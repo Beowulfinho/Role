@@ -168,7 +168,7 @@ var ATR = {}; ATRIBUTOS.forEach(function(a){ ATR[a[0]] = a[1]; });
 
 var S = {
   user: null, grupos: [], grupo: null, membros: [], perfis: {}, lugares: [],
-  somenteLeitura: false, ordem: lsGet("role_ordem") === "data" ? "data" : "nota", authModo: "login", vista: lsGet("role_vista") === "mapa" ? "mapa" : "lista", aba: "ja_fomos", cat: "", busca: "", form: null
+  somenteLeitura: false, amigos: [], sheetAmigos: [], ordem: lsGet("role_ordem") === "data" ? "data" : "nota", authModo: "login", vista: lsGet("role_vista") === "mapa" ? "mapa" : "lista", aba: "ja_fomos", cat: "", busca: "", form: null
 };
 
 var app = document.getElementById("app");
@@ -277,6 +277,7 @@ function route(){
   var p = (location.hash || "").replace(/^#\/?/, "").split("/");
   var r = p[0] || "";
   if (r === "publico" && p[1]) return viewPublico(p[1]);
+  if (r === "amigos") return viewAmigos();
   if (r === "g" && p[1]){
     var gid = p[1];
     var pronto = (S.grupo && S.grupo.id === gid && !S.somenteLeitura) ? Promise.resolve() : (app.innerHTML = '<p class="empty">Carregando…</p>', carregarGrupo(gid));
@@ -342,7 +343,8 @@ function viewGrupos(){
   });
   h += '<hr><div class="stack">' +
     '<button class="btn" data-act="sheetCriar">Criar grupo</button>' +
-    '<button class="btn sec" data-act="sheetEntrar">Entrar com código</button></div>';
+    '<button class="btn sec" data-act="sheetEntrar">Entrar com código</button>' +
+    '<button class="btn sec" data-act="irAmigos">👥 Amigos' + (pedidosRecebidos().length ? ' · ' + pedidosRecebidos().length + (pedidosRecebidos().length === 1 ? " pedido" : " pedidos") : "") + '</button></div>';
   app.innerHTML = h;
   if (S.grupos.length === 1 && S.grupos[0].tipo !== "pessoal" && !S._grupoAuto){ S._grupoAuto = true; go("#/g/" + S.grupos[0].id); }
 }
@@ -360,8 +362,10 @@ function sheetCriar(){
     '<div><label class="f" for="gNome">Nome do grupo</label><input type="text" id="gNome" maxlength="60" placeholder="Ex.: Os facheros"></div>' +
     '<div><label class="f">Tipo</label><div class="chips" id="gTipo">' +
       '<button class="chip on" data-act="gTipo" data-v="casal">Casal</button><button class="chip" data-act="gTipo" data-v="amigos">Amigos</button></div></div>' +
+    '<div><label class="f">Amigos Rolê (opcional)</label><div id="gAmigos"></div></div>' +
     '<div class="err" id="gErr"></div><button class="btn" id="gOk" data-act="criarGrupo">Criar</button></div>');
   $("gNome").focus();
+  S.sheetAmigos = []; renderAmigosSheet(); carregarAmigos().then(renderAmigosSheet, function(){});
 }
 function sheetEntrar(){
   abrirSheet('<h2 style="margin-bottom:12px">Entrar em um grupo</h2><div class="stack">' +
@@ -373,7 +377,7 @@ function criarGrupo(){
   var nome = $("gNome").value.trim();
   if (!nome){ $("gErr").textContent = "Dê um nome ao grupo."; return; }
   $("gOk").disabled = true;
-  sb.rpc("criar_grupo", { p_nome: nome, p_tipo: S.sheetTipo }).then(function(r){
+  sb.rpc("criar_grupo", { p_nome: nome, p_tipo: S.sheetTipo, p_amigos: S.sheetAmigos }).then(function(r){
     if (r.error){ $("gOk").disabled = false; $("gErr").textContent = traduzErro(r.error); return; }
     fecharSheet();
     carregarGrupos().then(function(){ S.grupo = null; go("#/g/" + r.data); });
@@ -387,6 +391,108 @@ function entrarGrupo(codigo, silencioso){
     }
     fecharSheet();
     return carregarGrupos().then(function(){ S.grupo = null; go("#/g/" + r.data); });
+  });
+}
+
+/* ---------- amigos Rolê ---------- */
+function carregarAmigos(){
+  return sb.rpc("listar_amigos").then(function(r){
+    if (r.error) throw r.error;
+    S.amigos = r.data || [];
+  });
+}
+function pedidosRecebidos(){ return S.amigos.filter(function(a){ return a.direcao === "recebida"; }); }
+function viewAmigos(){
+  limparMapaGrupo();
+  app.innerHTML = '<div class="top"><button class="iconbtn" data-act="irGrupos">‹</button><h1>Amigos</h1></div><p class="empty">Carregando…</p>';
+  Promise.all([ sb.rpc("meu_codigo_amigo"), carregarAmigos() ]).then(function(rs){
+    if (rs[0].error) throw rs[0].error;
+    S.codigoAmigo = rs[0].data;
+    renderAmigos();
+  }).catch(function(e){ toast(traduzErro(e)); go("#/grupos"); });
+}
+function renderAmigos(){
+  var link = location.origin + location.pathname + "?amigo=" + encodeURIComponent(S.codigoAmigo);
+  S.linkAmigo = link;
+  var rec = pedidosRecebidos(), env = S.amigos.filter(function(a){ return a.direcao === "enviada"; }), ok = S.amigos.filter(function(a){ return a.direcao === "amigo"; });
+  var linha = function(a, botoes){
+    return '<div class="card"><div class="row"><div class="grow"><div class="title">' + esc(a.nome || "Alguém") + '</div></div>' + botoes + '</div></div>';
+  };
+  var h = '<div class="top"><button class="iconbtn" data-act="irGrupos">‹</button><h1>Amigos</h1></div>' +
+    '<div class="card"><div class="faint">Seu código de amigo</div><div class="code" style="margin:6px 0">' + esc(S.codigoAmigo) + '</div>' +
+    '<div class="stack"><a class="btn" style="text-decoration:none;text-align:center" target="_blank" rel="noopener" href="https://wa.me/?text=' +
+      encodeURIComponent("Me adiciona como amigo no Rolê! Meu código: " + S.codigoAmigo + "\n" + link) + '">Enviar pelo WhatsApp</a>' +
+    '<button class="btn sec" data-act="copiarLinkAmigo">Copiar link</button></div></div>' +
+    '<h3 style="margin:16px 0 8px">Adicionar amigo</h3>' +
+    '<div class="row"><input type="text" id="amCod" class="grow" maxlength="8" autocapitalize="characters" placeholder="Código do amigo" style="flex:1">' +
+    '<button class="btn small" data-act="adicionarAmigo">Adicionar</button></div><div class="err" id="amErr"></div>';
+  if (rec.length){
+    h += '<h3 style="margin:16px 0 8px">Pedidos recebidos</h3>' + rec.map(function(a){
+      return linha(a, '<button class="btn small" data-act="aceitarAmizade" data-id="' + esc(a.id) + '">Aceitar</button>' +
+        '<button class="btn sec small" data-act="recusarAmizade" data-id="' + esc(a.id) + '">Recusar</button>');
+    }).join("");
+  }
+  if (env.length){
+    h += '<h3 style="margin:16px 0 8px">Aguardando resposta</h3>' + env.map(function(a){
+      return linha(a, '<button class="btn sec small" data-act="removerAmigo" data-u="' + esc(a.user_id) + '" data-n="' + esc(a.nome || "") + '">Cancelar</button>');
+    }).join("");
+  }
+  h += '<h3 style="margin:16px 0 8px">Meus amigos</h3>' + (ok.length ? ok.map(function(a){
+    return linha(a, '<button class="btn sec small" data-act="removerAmigo" data-u="' + esc(a.user_id) + '" data-n="' + esc(a.nome || "") + '">Remover</button>');
+  }).join("") : '<div class="empty" style="padding:18px 0">Nenhum amigo ainda.<br>Compartilhe seu código ou peça o de um amigo.</div>');
+  app.innerHTML = h;
+}
+function adicionarAmigo(){
+  var cod = ($("amCod").value || "").trim(), err = $("amErr");
+  err.textContent = "";
+  if (!cod){ err.textContent = "Digite o código do amigo."; return; }
+  sb.rpc("adicionar_amigo", { p_codigo: cod }).then(function(r){
+    if (r.error){
+      err.textContent = /proprio/.test(r.error.message) ? "Esse é o seu próprio código." : /invalido/.test(r.error.message) ? "Código de amigo inválido." : traduzErro(r.error);
+      return;
+    }
+    toast(r.data === "aceita" ? "Agora vocês são amigos no Rolê!" : "Pedido de amizade enviado.");
+    carregarAmigos().then(renderAmigos);
+  });
+}
+function responderAmizade(id, aceitar){
+  sb.rpc("responder_amizade", { p_id: id, p_aceitar: aceitar }).then(function(r){
+    if (r.error){ toast(traduzErro(r.error)); return; }
+    toast(aceitar ? "Amigo adicionado." : "Pedido recusado.");
+    carregarAmigos().then(renderAmigos);
+  });
+}
+function removerAmigo(uid, nome){
+  if (!confirm("Remover " + (nome || "este amigo") + " dos seus amigos? Os grupos em que vocês estão juntos continuam como estão.")) return;
+  sb.rpc("remover_amizade", { p_user: uid }).then(function(r){
+    if (r.error){ toast(traduzErro(r.error)); return; }
+    carregarAmigos().then(renderAmigos);
+  });
+}
+function renderAmigosSheet(){
+  var el = $("gAmigos"); if (!el) return;
+  var am = S.amigos.filter(function(a){ return a.direcao === "amigo"; });
+  if (!am.length){ el.innerHTML = '<div class="faint">Você ainda não tem amigos no Rolê. Adicione na tela <b>Amigos</b> (na lista de grupos).</div>'; return; }
+  el.innerHTML = '<div class="chips">' + am.map(function(a){
+    return '<button type="button" class="chip ' + (S.sheetAmigos.indexOf(a.user_id) >= 0 ? "on" : "") + '" data-act="gAmigo" data-u="' + esc(a.user_id) + '">' + esc(a.nome || "Amigo") + '</button>';
+  }).join("") + '</div>';
+}
+function secaoAmigosGrupo(g){
+  if (g.papel !== "admin") return "";
+  var h = '<hr style="margin:18px 0 14px"><h3 style="margin-bottom:6px">Adicionar amigo Rolê</h3>';
+  var amigos = S.amigos.filter(function(a){ return a.direcao === "amigo"; });
+  if (!amigos.length) return h + '<p class="muted" style="margin-top:0">Você ainda não tem amigos no Rolê. Adicione na tela Amigos.</p>';
+  var fora = amigos.filter(function(a){ return !S.membros.some(function(m){ return m.user_id === a.user_id; }); });
+  if (!fora.length) return h + '<p class="muted" style="margin-top:0">Todos os seus amigos já estão neste grupo.</p>';
+  return h + fora.map(function(a){
+    return '<div class="row" style="margin-bottom:8px"><span class="grow">' + esc(a.nome || "Amigo") + '</span><button class="btn small" data-act="addAmigoGrupo" data-u="' + esc(a.user_id) + '">Adicionar</button></div>';
+  }).join("");
+}
+function addAmigoGrupo(uid){
+  sb.rpc("adicionar_amigo_ao_grupo", { p_grupo: S.grupo.id, p_amigo: uid }).then(function(r){
+    if (r.error){ toast(traduzErro(r.error)); return; }
+    toast("Amigo adicionado ao grupo.");
+    carregarGrupo(S.grupo.id).then(function(){ convidar(); });
   });
 }
 
@@ -616,7 +722,7 @@ function convidar(){
   abrirSheet('<h2>Convidar para ' + esc(g.nome) + '</h2><div class="code">' + esc(g.codigo) + '</div>' +
     '<p class="muted center" style="margin-top:0">Quem entrar com esse código vê todos os lugares do grupo.</p>' +
     '<div class="stack"><a class="btn" style="text-decoration:none;text-align:center" target="_blank" rel="noopener" href="https://wa.me/?text=' + encodeURIComponent(S.convite.texto) + '">Enviar pelo WhatsApp</a>' +
-    '<button class="btn sec" data-act="copiarConvite">Copiar convite</button></div>' + secaoCatalogo(g));
+    '<button class="btn sec" data-act="copiarConvite">Copiar convite</button></div>' + secaoCatalogo(g) + secaoAmigosGrupo(g));
 }
 
 /* ---------- detalhe do lugar ---------- */
@@ -1319,6 +1425,19 @@ document.addEventListener("click", function(e){
     case "fotoFechar": return fecharFoto();
     case "fotoPrev": S.lb.i = (S.lb.i + S.lb.caminhos.length - 1) % S.lb.caminhos.length; return mostrarFoto();
     case "fotoNext": S.lb.i = (S.lb.i + 1) % S.lb.caminhos.length; return mostrarFoto();
+    case "irAmigos": return go("#/amigos");
+    case "copiarLinkAmigo":
+      if (navigator.clipboard) navigator.clipboard.writeText(S.linkAmigo).then(function(){ toast("Link copiado"); });
+      return;
+    case "adicionarAmigo": return adicionarAmigo();
+    case "aceitarAmizade": return responderAmizade(d.id, true);
+    case "recusarAmizade": return responderAmizade(d.id, false);
+    case "removerAmigo": return removerAmigo(d.u, d.n);
+    case "gAmigo":
+      var ix = S.sheetAmigos.indexOf(d.u);
+      if (ix >= 0) S.sheetAmigos.splice(ix, 1); else S.sheetAmigos.push(d.u);
+      return renderAmigosSheet();
+    case "addAmigoGrupo": return addAmigoGrupo(d.u);
     case "catalogoVis": return mudarVisibilidade(d.v);
     case "copiarPublico":
       if (navigator.clipboard) navigator.clipboard.writeText(S.linkPublico).then(function(){ toast("Link copiado"); });
@@ -1347,6 +1466,11 @@ document.addEventListener("click", function(e){
       lsSet("role_convite", c.toUpperCase());
       history.replaceState(null, "", location.pathname + location.hash);
     }
+    var am = new URLSearchParams(location.search).get("amigo");
+    if (am && /^[A-Za-z0-9]{6,12}$/.test(am)){
+      lsSet("role_amigo", am.toUpperCase());
+      history.replaceState(null, "", location.pathname + location.hash);
+    }
     var pb = new URLSearchParams(location.search).get("publico");
     if (pb && /^[0-9a-f-]{36}$/i.test(pb)){
       lsSet("role_publico", pb.toLowerCase());
@@ -1369,6 +1493,17 @@ function iniciar(user){
       if (r.data) r.data.forEach(function(x){ S.perfis[x.id] = x; });
     });
   }).then(function(){
+    return carregarAmigos().then(function(){}, function(){});
+  }).then(function(){
+    var am = lsGet("role_amigo");
+    if (am){
+      lsSet("role_amigo", null);
+      return sb.rpc("adicionar_amigo", { p_codigo: am }).then(function(r){
+        toast(r.error ? (/proprio/.test(r.error.message) ? "Esse é o seu próprio código." : "Código de amigo inválido.")
+          : r.data === "aceita" ? "Agora vocês são amigos no Rolê!" : "Pedido de amizade enviado.");
+        return carregarAmigos().then(function(){}, function(){});
+      }).then(function(){ go("#/amigos"); });
+    }
     var pub = lsGet("role_publico");
     if (pub){ lsSet("role_publico", null); location.hash = "#/publico/" + pub; return; }
     if (!location.hash || location.hash === "#/" || location.hash === "#"){
@@ -1384,7 +1519,7 @@ sb.auth.onAuthStateChange(function(evento, session){
     if (session && session.user){
       if (!S.user || S.user.id !== session.user.id) iniciar(session.user);
     } else {
-      S.user = null; S.grupo = null; S.somenteLeitura = false; S.grupos = []; S.lugares = [];
+      S.user = null; S.grupo = null; S.somenteLeitura = false; S.amigos = []; S.grupos = []; S.lugares = [];
       location.hash = ""; viewAuth();
     }
   }, 0);
