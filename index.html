@@ -240,6 +240,8 @@ function traduzErro(e){
   if (/Email not confirmed/i.test(m)) return "Confirme seu e-mail antes de entrar.";
   if (/outro grupo usa/i.test(m)) return "Outro grupo usa este lugar, então não dá para mesclar por aqui.";
   if (/sem permissao/i.test(m)) return "Você não tem permissão para mesclar este lugar.";
+  if (/selecione ao menos um participante/i.test(m)) return "Selecione pelo menos um integrante que foi ao rolê.";
+  if (/participante nao integrante/i.test(m)) return "Só integrantes do grupo podem participar do rolê.";
   if (/proprio catalogo/i.test(m)) return "Você não pode apoiar o seu próprio catálogo.";
   if (/catalogo nao publico/i.test(m)) return "Este catálogo não é mais público.";
   if (/Failed to fetch|NetworkError|Load failed/i.test(m)) return "Sem conexão com a internet.";
@@ -291,7 +293,7 @@ function carregarGrupo(id){
   if (!g) return Promise.reject(new Error("Grupo não encontrado"));
   S.grupo = g; S.somenteLeitura = false;
   return Promise.all([
-    sb.from("lugares").select("*, locais(*), visitas(*, avaliacoes(*), fotos(*))").eq("grupo_id", id).order("created_at",{ascending:false}),
+    sb.from("lugares").select("*, locais(*), visitas(*, avaliacoes(*), fotos(*), visita_participantes(user_id))").eq("grupo_id", id).order("created_at",{ascending:false}),
     sb.from("grupo_membros").select("user_id,papel").eq("grupo_id", id),
     sb.from("perfis").select("id,nome,avatar_url")
   ]).then(function(rs){
@@ -1103,8 +1105,10 @@ function viewLugar(id){
   if (!visitas.length) h += '<div class="empty" style="padding:20px 0">Ainda sem rolês. Registre o primeiro!</div>';
   visitas.forEach(function(v){
     var avs = v.avaliacoes || [], minha = avs.filter(function(a){ return a.user_id === eu; })[0];
+    var quemFoi = (v.visita_participantes || []).map(function(x){ return nomeDe(x.user_id); }).join(", ");
     h += '<div class="card"><div class="row" style="margin-bottom:8px"><div class="grow"><b>' + fmtData(v.data) + '</b>' +
-      '<div class="faint">' + [v.delivery ? "🛵 Delivery" : null, v.gasto_total != null ? fmtMoney(Number(v.gasto_total)) : null, v.num_pessoas ? v.num_pessoas + " pessoa(s)" : null].filter(Boolean).join(" · ") + '</div></div>' +
+      '<div class="faint">' + [v.delivery ? "🛵 Delivery" : null, v.gasto_total != null ? fmtMoney(Number(v.gasto_total)) : null, v.num_pessoas ? v.num_pessoas + " pessoa(s)" : null].filter(Boolean).join(" · ") + '</div>' +
+      (quemFoi ? '<div class="faint">👥 ' + esc(quemFoi) + '</div>' : '') + '</div>' +
       '<button class="btn sec small" data-act="visita" data-l="' + esc(l.id) + '" data-v="' + esc(v.id) + '">' + (minha ? "Editar" : "Avaliar") + '</button></div>';
     h += stripFotos(v);
     avs.forEach(function(a){
@@ -1622,6 +1626,8 @@ function viewFormVisita(lugarId, visitaId){
   S.form = {
     lugarId: lugarId, visitaId: visitaId,
     cb: minha ? minha.custo_beneficio : null, voltaria: minha ? minha.voltaria : null,
+    participantes: v ? (v.visita_participantes || []).map(function(x){ return x.user_id; }) : [S.user.id],
+    pessoasManual: !!v,
     delivery: v ? !!v.delivery : false,
     fotosExist: v ? ordenarFotos(v) : [], fotosNovas: [], fotosRemover: []
   };
@@ -1629,8 +1635,10 @@ function viewFormVisita(lugarId, visitaId){
   var h = '<div class="top"><button class="iconbtn" data-act="voltar">‹</button><h1>' + (v ? "Editar rolê" : "Novo rolê") + '</h1></div><div class="stack">' +
     '<div class="card" style="margin:0"><div class="title">' + esc(l.nome) + '</div><div class="muted">' + resumoLocal(l) + '</div>' +
       (fmtEnd(l) ? '<div class="faint">' + esc(fmtEnd(l)) + '</div>' : '') + '</div>' +
+    (S.grupo.tipo === "pessoal" ? '' : '<div><label class="f">Quem foi ao rolê?</label><div class="chips" id="gPart"></div>' +
+      '<div class="faint" style="margin-top:6px">Selecione pelo menos uma pessoa do grupo.</div></div>') +
     '<div class="row"><div class="grow"><label class="f" for="vData">Data do rolê</label><input type="date" id="vData" max="' + hoje() + '" value="' + esc(v ? v.data : hoje()) + '"></div>' +
-      '<div class="grow"><label class="f" for="vPessoas">Pessoas</label><input type="number" id="vPessoas" min="1" max="99" inputmode="numeric" value="' + (v && v.num_pessoas ? v.num_pessoas : (S.membros.length || 2)) + '"></div></div>' +
+      '<div class="grow"><label class="f" for="vPessoas">Pessoas</label><input type="number" id="vPessoas" min="1" max="99" inputmode="numeric" value="' + (v && v.num_pessoas ? v.num_pessoas : S.form.participantes.length) + '"></div></div>' +
     '<div><label class="f">Como foi?</label><div class="chips" id="gDelivery">' +
       '<button type="button" class="chip ' + (!S.form.delivery ? "on" : "") + '" data-act="fSingle" data-g="delivery" data-v="false">🍽️ Presencial</button>' +
       '<button type="button" class="chip ' + (S.form.delivery ? "on" : "") + '" data-act="fSingle" data-g="delivery" data-v="true">🛵 Delivery</button></div></div>' +
@@ -1657,6 +1665,21 @@ function viewFormVisita(lugarId, visitaId){
   });
   $("fFotos").addEventListener("change", function(e){ adicionarFotos(e.target.files); e.target.value = ""; });
   renderFotosForm();
+  renderParticipantes();
+  $("vPessoas").addEventListener("input", function(){ S.form.pessoasManual = true; });
+}
+function renderParticipantes(){
+  var box = $("gPart"), f = S.form; if (!box) return;
+  var lista = S.membros.slice().sort(function(a, b){
+    if (a.user_id === S.user.id) return -1;
+    if (b.user_id === S.user.id) return 1;
+    return nomeDe(a.user_id).localeCompare(nomeDe(b.user_id));
+  });
+  box.innerHTML = lista.map(function(m){
+    var on = f.participantes.indexOf(m.user_id) >= 0;
+    return '<button type="button" class="chip ' + (on ? "on" : "") + '" data-act="fPart" data-u="' + esc(m.user_id) + '">' +
+      esc(nomeDe(m.user_id)) + (m.user_id === S.user.id ? " (você)" : "") + '</button>';
+  }).join("");
 }
 function salvarVisita(){
   var f = S.form, l = lugarPorId(f.lugarId);
@@ -1672,11 +1695,23 @@ function salvarVisita(){
     nota: Number($("vNota").value), custo_beneficio: f.cb || null, voltaria: f.voltaria || null,
     pedidos: $("vPedidos").value.trim() || null, comentario: $("vCom").value.trim() || null
   };
+  var parts = S.grupo.tipo === "pessoal" ? [S.user.id] : f.participantes.slice();
+  if (!parts.length){ $("fErr").textContent = "Selecione pelo menos um integrante que foi ao rolê."; return; }
   var btn = $("fOk"); btn.disabled = true; btn.textContent = "Salvando…"; $("fErr").textContent = "";
   var novo = !f.visitaId, falhas = 0;
   var pVisita = f.visitaId
-    ? sb.from("visitas").update(vis).eq("id", f.visitaId).select().single()
-    : sb.from("visitas").insert(Object.assign({ lugar_id: f.lugarId }, vis)).select().single();
+    ? sb.from("visitas").update(vis).eq("id", f.visitaId).select().single().then(function(r){
+        if (r.error) throw r.error;
+        return sb.rpc("definir_participantes", { p_visita: f.visitaId, p_participantes: parts }).then(function(r2){
+          if (r2.error) throw r2.error;
+          return { data: { id: f.visitaId } };
+        });
+      })
+    : sb.rpc("criar_role", { p_lugar: f.lugarId, p_data: vis.data, p_gasto: vis.gasto_total, p_pessoas: vis.num_pessoas,
+        p_delivery: vis.delivery, p_participantes: parts }).then(function(r){
+        if (r.error) throw r.error;
+        return { data: { id: r.data } };
+      });
   pVisita.then(function(r){
     if (r.error) throw r.error;
     f.visitaId = r.data.id;
@@ -1761,6 +1796,12 @@ document.addEventListener("click", function(e){
       if (i >= 0) S.form.atributos.splice(i, 1); else S.form.atributos.push(d.v);
       return marcar(el.parentNode, el, true);
     case "usarLoc": return usarLocalizacao();
+    case "fPart":
+      var ip = S.form.participantes.indexOf(d.u);
+      if (ip >= 0) S.form.participantes.splice(ip, 1); else S.form.participantes.push(d.u);
+      renderParticipantes();
+      if (!S.form.pessoasManual && $("vPessoas")) $("vPessoas").value = Math.max(1, S.form.participantes.length);
+      return;
     case "addFotos": return $("fFotos").click();
     case "fotoRemoverNova":
       var fn = S.form.fotosNovas.splice(parseInt(d.i, 10), 1)[0];
