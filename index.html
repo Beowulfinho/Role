@@ -10,7 +10,8 @@
 <title>Rolê</title>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" type="image/svg+xml" href="icon.svg">
-<link rel="apple-touch-icon" href="icon.svg">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-180.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Inter:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
@@ -166,6 +167,7 @@ function traduzErro(e){
   if (/Email not confirmed/i.test(m)) return "Confirme seu e-mail antes de entrar.";
   if (/outro grupo usa/i.test(m)) return "Outro grupo usa este lugar, então não dá para mesclar por aqui.";
   if (/sem permissao/i.test(m)) return "Você não tem permissão para mesclar este lugar.";
+  if (/Failed to fetch|NetworkError|Load failed/i.test(m)) return "Sem conexão com a internet.";
   if (/rate limit/i.test(m)) return "Muitas tentativas. Espere um pouco e tente de novo.";
   return m;
 }
@@ -903,6 +905,10 @@ sb.auth.onAuthStateChange(function(evento, session){
   }, 0);
 });
 sb.auth.getSession().then(function(r){ if (!r.data.session) viewAuth(); });
+
+if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")){
+  window.addEventListener("load", function(){ navigator.serviceWorker.register("sw.js").catch(function(){}); });
+}
 
 })();
 </script>
