@@ -40,7 +40,7 @@
   #app{max-width:560px;margin:0 auto;min-height:100vh;padding:0 16px calc(96px + env(safe-area-inset-bottom))}
   .top{display:flex;align-items:center;gap:10px;padding:calc(14px + env(safe-area-inset-top)) 0 10px;position:sticky;top:0;background:var(--bg);z-index:5}
   .top h1{font-size:22px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .iconbtn{border:1px solid var(--line);background:var(--card);border-radius:12px;height:40px;min-width:40px;padding:0 12px;font-weight:600}
+  .iconbtn{border:1px solid var(--line);background:var(--card);border-radius:12px;height:40px;min-width:40px;padding:0 10px;font-weight:600;font-size:14px}
   .btn{border:0;background:var(--accent);color:var(--accent-ink);border-radius:14px;padding:13px 18px;font-weight:600;width:100%}
   .btn.sec{background:var(--card);color:var(--ink);border:1px solid var(--line)}
   .btn.danger{background:transparent;color:var(--bad);border:1px solid var(--line)}
@@ -98,6 +98,14 @@
   .brand{font-family:"Bricolage Grotesque",sans-serif;font-size:44px;font-weight:700;color:var(--accent);text-align:center;margin:44px 0 4px}
   .map{height:260px;border-radius:14px;border:1px solid var(--line);z-index:0}
   .pin{background:none;border:0;font-size:28px;line-height:30px}
+  .map.big{height:min(62vh,560px);min-height:320px}
+  .mkwrap{background:none;border:0}
+  .mk{width:36px;height:36px;border-radius:50%;border:3px solid #fff;color:#fff;display:flex;align-items:center;justify-content:center;
+    font:700 13px "Bricolage Grotesque",sans-serif;box-shadow:0 2px 6px rgba(0,0,0,.4)}
+  .mk.good{background:#2E7D4F} .mk.mid{background:#B07A12} .mk.bad{background:#B53A2D} .mk.none{background:#6B625A}
+  .mk.plan{background:#D9552B;font-size:17px}
+  .eu{background:#2F6FDE;border:3px solid #fff;border-radius:50%;box-shadow:0 0 0 6px rgba(47,111,222,.25)}
+  .leaflet-popup-content{color:#26211D;margin:12px 14px;font-family:Inter,system-ui,sans-serif}
   .rev{border-top:1px solid var(--line);padding-top:10px;margin-top:10px}
   .rev:first-child{border-top:0;padding-top:0;margin-top:0}
 </style>
@@ -132,7 +140,7 @@ var ATR = {}; ATRIBUTOS.forEach(function(a){ ATR[a[0]] = a[1]; });
 
 var S = {
   user: null, grupos: [], grupo: null, membros: [], perfis: {}, lugares: [],
-  authModo: "login", aba: "ja_fomos", cat: "", busca: "", form: null
+  authModo: "login", vista: lsGet("role_vista") === "mapa" ? "mapa" : "lista", aba: "ja_fomos", cat: "", busca: "", form: null
 };
 
 var app = document.getElementById("app");
@@ -232,6 +240,7 @@ function lugarPorId(id){ return S.lugares.filter(function(l){ return l.id === id
 /* ---------- roteamento ---------- */
 function go(h){ if (location.hash === h) route(); else location.hash = h; }
 function route(){
+  limparMapaGrupo();
   if (!S.user) return viewAuth();
   var p = (location.hash || "").replace(/^#\/?/, "").split("/");
   var r = p[0] || "";
@@ -350,8 +359,10 @@ function entrarGrupo(codigo, silencioso){
 
 /* ---------- lista de lugares ---------- */
 function viewLista(){
+  limparMapaGrupo();
   var g = S.grupo;
   var h = '<div class="top"><button class="iconbtn" data-act="irGrupos" aria-label="Grupos">‹</button><h1>' + esc(g.nome) + '</h1>' +
+    '<button class="iconbtn" data-act="vista">' + (S.vista === "mapa" ? "☰ Lista" : "🗺️ Mapa") + '</button>' +
     '<button class="iconbtn" data-act="convidar">Convidar</button></div>' +
     '<div class="tabs" style="margin-bottom:12px">' +
       '<button data-act="aba" data-v="ja_fomos" class="' + (S.aba === "ja_fomos" ? "on" : "") + '">Já fomos</button>' +
@@ -377,6 +388,8 @@ function renderCards(){
     return (!S.cat || l.categoria === S.cat) && (!q || norm(l.nome + " " + (l.bairro||"") + " " + (l.cidade||"")).indexOf(q) >= 0);
   }).map(function(l){ return { l:l, s:stats(l) }; });
   if (S.aba === "ja_fomos") lista.sort(function(a,b){ return (b.s.media == null ? -1 : b.s.media) - (a.s.media == null ? -1 : a.s.media); });
+  if (S.vista === "mapa") return renderMapa(lista);
+  limparMapaGrupo();
   var h = "";
   lista.forEach(function(x){
     var l = x.l, s = x.s, c = CAT[l.categoria] || CAT.outro;
@@ -397,6 +410,68 @@ function renderCards(){
   }
   $("cards").innerHTML = h;
 }
+/* ---------- mapa do grupo ---------- */
+function limparMapaGrupo(){
+  if (S.mapaG){ S.mapaG.remove(); S.mapaG = null; S.mapaMarcas = null; S.mapaEu = null; }
+}
+function marcadorLugar(l, st){
+  var plan = l.estado === "quero_ir";
+  return L.marker([l.lat, l.lng], { icon: L.divIcon({
+    className: "mkwrap", html: '<div class="mk ' + (plan ? "plan" : notaClasse(st.media)) + '">' + (plan ? "☆" : fmtNota(st.media)) + "</div>",
+    iconSize: [36, 36], iconAnchor: [18, 18], popupAnchor: [0, -18] }) });
+}
+function popupLugar(l, st){
+  var box = document.createElement("div");
+  var c = CAT[l.categoria] || CAT.outro;
+  box.innerHTML = '<b>' + esc(l.nome) + '</b><div style="color:#6B625A;font-size:13px;margin:2px 0 8px">' +
+    [c[1] + " " + c[2], l.bairro].filter(Boolean).map(esc).join(" · ") +
+    (l.estado === "ja_fomos" ? " · nota " + fmtNota(st.media) : " · quero ir") + "</div>";
+  var b = document.createElement("button");
+  b.className = "btn small"; b.textContent = "Abrir";
+  b.addEventListener("click", function(){ go("#/g/" + S.grupo.id + "/lugar/" + l.id); });
+  box.appendChild(b);
+  return box;
+}
+function renderMapa(lista){
+  var box = $("cards");
+  if (!window.L){ box.innerHTML = '<div class="empty">Mapa indisponível agora.</div>'; return; }
+  var comLoc = lista.filter(function(x){ return x.l.lat != null && x.l.lng != null; });
+  if (!S.mapaG || !box.contains(S.mapaG.getContainer())){
+    limparMapaGrupo();
+    box.innerHTML = '<div id="mapaGrupo" class="map big"></div>' +
+      '<div class="faint" id="mapaInfo" style="margin-top:8px;padding-right:120px"></div>';
+    var u = null; try { u = JSON.parse(lsGet("role_ultimo") || "null"); } catch(e){}
+    S.mapaG = L.map("mapaGrupo").setView(u || [-14.2, -51.9], u ? 12 : 4);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(S.mapaG);
+    S.mapaMarcas = L.layerGroup().addTo(S.mapaG);
+    var ctl = L.control({ position: "topright" });
+    ctl.onAdd = function(){
+      var b = L.DomUtil.create("button", "iconbtn"); b.type = "button"; b.textContent = "📍 Onde estou";
+      b.style.cssText = "background:#fff;color:#26211D;border:2px solid rgba(0,0,0,.2);box-shadow:none";
+      L.DomEvent.disableClickPropagation(b);
+      L.DomEvent.on(b, "click", mapaOndeEstou);
+      return b;
+    };
+    ctl.addTo(S.mapaG);
+  }
+  S.mapaMarcas.clearLayers();
+  comLoc.forEach(function(x){ marcadorLugar(x.l, x.s).bindPopup(popupLugar(x.l, x.s)).addTo(S.mapaMarcas); });
+  if (comLoc.length === 1) S.mapaG.setView([comLoc[0].l.lat, comLoc[0].l.lng], 16);
+  else if (comLoc.length > 1) S.mapaG.fitBounds(L.latLngBounds(comLoc.map(function(x){ return [x.l.lat, x.l.lng]; })), { padding: [40, 40], maxZoom: 17 });
+  var sem = lista.length - comLoc.length;
+  $("mapaInfo").textContent = comLoc.length + (comLoc.length === 1 ? " lugar no mapa" : " lugares no mapa") +
+    (sem ? " · " + sem + " sem localização (edite o lugar para marcar)" : "");
+}
+function mapaOndeEstou(){
+  pedirLocalizacao(function(){
+    if (!S.mapaG) return;
+    if (GEO.lat == null){ toast("Não consegui sua localização. Permita o acesso no navegador."); return; }
+    if (S.mapaEu) S.mapaEu.remove();
+    S.mapaEu = L.marker([GEO.lat, GEO.lng], { interactive: false, icon: L.divIcon({ className: "mkwrap", html: '<div class="eu" style="width:18px;height:18px"></div>', iconSize: [18, 18], iconAnchor: [9, 9] }) }).addTo(S.mapaG);
+    S.mapaG.setView([GEO.lat, GEO.lng], Math.max(S.mapaG.getZoom(), 15));
+  });
+}
+
 function convidar(){
   var g = S.grupo;
   var link = location.origin + location.pathname + "?codigo=" + encodeURIComponent(g.codigo);
@@ -833,6 +908,8 @@ document.addEventListener("click", function(e){
       return;
     case "aba": S.aba = d.v; S.cat = ""; return viewLista();
     case "cat": S.cat = d.v; return renderCards();
+    case "vista": S.vista = S.vista === "mapa" ? "lista" : "mapa"; lsSet("role_vista", S.vista); return viewLista();
+    case "mapaEu": return mapaOndeEstou();
     case "novoLugar": return go("#/g/" + g + "/novo");
     case "abrirLugar": return go("#/g/" + g + "/lugar/" + d.id);
     case "editarLugar": return go("#/g/" + g + "/editar/" + d.id);
