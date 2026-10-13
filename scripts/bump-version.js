@@ -14,3 +14,5 @@ if (!m) { console.error("APP_VERSION não encontrada em " + file); process.exit(
 const novo = major ? (parseInt(m[1], 10) + 1) + ".0" : m[1] + "." + (parseInt(m[2], 10) + 1);
 fs.writeFileSync(file, s.replace(re, 'var APP_VERSION = "' + novo + '";'));
 console.log(m[1] + "." + m[2] + " -> " + novo);
+// o hash do script embutido muda junto com a versão: atualiza a CSP
+require("child_process").execFileSync(process.execPath, ["scripts/csp.js", "--file", file], { stdio: "inherit" });

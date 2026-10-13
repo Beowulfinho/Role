@@ -5,3 +5,8 @@ mobile/android/build/
 mobile/android/app/build/
 mobile/android/local.properties
 mobile/android/capacitor-cordova-android-plugins/build/
+# chaves de assinatura do Android: nunca vão para o git
+mobile/keystore.properties
+mobile/keystore/
+*.jks
+*.keystore

@@ -2,6 +2,7 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-xJHJ/AAaOHPNzXwvu1+18SmfjPV+tGs5U3oZbWfx/DA=' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://wyirmfuinpaaeodpbwcz.supabase.co https://tiles.openfreemap.org; connect-src 'self' https://wyirmfuinpaaeodpbwcz.supabase.co wss://wyirmfuinpaaeodpbwcz.supabase.co https://nominatim.openstreetmap.org https://tiles.openfreemap.org; worker-src 'self' blob:; child-src blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#D9552B">
 <meta name="mobile-web-app-capable" content="yes">
@@ -14,12 +15,12 @@
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Inter:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css">
-<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@maplibre/maplibre-gl-leaflet@0.0.22/leaflet-maplibre-gl.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" integrity="sha384-c6Rcwz4e4CITMbu/NBmnNS8yN2sC3cUElMEMfP3vqqKFp7GOYaaBBCqmaWBjmkjb" crossorigin="anonymous">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" integrity="sha384-NElt3Op+9NBMCYaef5HxeJmU4Xeard/Lku8ek6hoPTvYkQPh3zLIrJP7KiRocsxO" crossorigin="anonymous"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css" integrity="sha384-MinO0mNliZ3vwppuPOUnGa+iq619pfMhLVUXfC4LHwSCvF9H+6P/KO4Q7qBOYV5V" crossorigin="anonymous">
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js" integrity="sha384-SYKAG6cglRMN0RVvhNeBY0r3FYKNOJtznwA0v7B5Vp9tr31xAHsZC0DqkQ/pZDmj" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@maplibre/maplibre-gl-leaflet@0.0.22/leaflet-maplibre-gl.js" integrity="sha384-4CB9Vtol9LN6lGgBCvmPLbUEZwilrqIvPieSRurgAXAB7FVJaLS9n8WyAIA5wjQ+" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js" integrity="sha384-0w2KAL2YHP6wKOkUDzkCDGgVvfmHnj02DHeQ6XcHOgTfFsGyonKOpShMH1x6nk9o" crossorigin="anonymous"></script>
 <style>
   :root{
     --bg:#FAF6F1; --card:#FFFFFF; --ink:#26211D; --ink-soft:#6B625A; --ink-faint:#9C9389;
@@ -182,6 +183,8 @@
 <body>
 <div id="app"></div>
 <script>
+/* anti-clickjacking: o app nunca deve rodar dentro de outro site */
+if (window.top !== window.self){ try { window.top.location = window.self.location.href; } catch(e){ document.documentElement.style.display = "none"; } }
 (function(){
 "use strict";
 
@@ -214,7 +217,7 @@ function htmlMarca(){
 
 var S = {
   user: null, grupos: [], grupo: null, membros: [], perfis: {}, lugares: [],
-  somenteLeitura: false, naoLidas: 0, canalNotif: null, amigos: [], sheetAmigos: [], ordem: lsGet("role_ordem") === "data" ? "data" : "nota", authModo: "login", vista: lsGet("role_vista") === "mapa" ? "mapa" : "lista", aba: "ja_fomos", cat: "", busca: "", form: null
+  somenteLeitura: false, ehAdmin: false, naoLidas: 0, canalNotif: null, amigos: [], sheetAmigos: [], ordem: lsGet("role_ordem") === "data" ? "data" : "nota", authModo: "login", vista: lsGet("role_vista") === "mapa" ? "mapa" : "lista", aba: "ja_fomos", cat: "", busca: "", form: null
 };
 
 var app = document.getElementById("app");
@@ -244,7 +247,9 @@ function traduzErro(e){
   var m = (e && e.message) || String(e || "");
   if (/Invalid login credentials/i.test(m)) return "E-mail ou senha incorretos.";
   if (/already registered/i.test(m)) return "Esse e-mail já tem conta. Tente entrar.";
-  if (/Password should be/i.test(m)) return "A senha precisa ter pelo menos 6 caracteres.";
+  if (/Password should be/i.test(m)) return "A senha precisa ter pelo menos 8 caracteres.";
+  if (/muitas tentativas/i.test(m)) return "Muitas tentativas em pouco tempo. Tente de novo mais tarde.";
+  if (/usuario invalido/i.test(m)) return "Não foi possível fazer isso com este usuário.";
   if (/codigo invalido/i.test(m)) return "Código de convite inválido.";
   if (/Email not confirmed/i.test(m)) return "Confirme seu e-mail antes de entrar.";
   if (/outro grupo usa/i.test(m)) return "Outro grupo usa este lugar, então não dá para mesclar por aqui.";
@@ -332,6 +337,8 @@ function route(){
   if (r === "publico" && p[1]) return viewPublico(p[1]);
   if (r === "amigos") return viewAmigos();
   if (r === "notificacoes") return viewNotificacoes();
+  if (r === "conta") return viewConta();
+  if (r === "denuncias") return viewDenuncias();
   if (r === "perfil") return viewPerfil();
   if (r === "u" && p[1]) return viewPerfilPublico(p[1]);
   if (r === "g" && p[1]){
@@ -365,16 +372,18 @@ function viewAuth(){
       (cad ? '<div><label class="f" for="aNome">Seu nome</label><input type="text" id="aNome" autocomplete="name"></div>' : '') +
       '<div><label class="f" for="aEmail">E-mail</label><input type="email" id="aEmail" autocomplete="email" inputmode="email"></div>' +
       '<div><label class="f" for="aSenha">Senha</label><input type="password" id="aSenha" autocomplete="' + (cad ? "new-password" : "current-password") + '"></div>' +
+      (cad ? '<div class="faint">Ao criar a conta, você confirma que tem 18 anos ou mais e aceita os <a href="termos.html" target="_blank" rel="noopener">Termos de Uso</a> e a <a href="privacidade.html" target="_blank" rel="noopener">Política de Privacidade</a>.</div>' : '') +
       '<div class="err" id="aErr"></div>' +
       '<button class="btn" id="aOk" data-act="auth">' + (cad ? "Criar conta" : "Entrar") + '</button>' +
       '<button class="btn sec" data-act="authModo">' + (cad ? "Já tenho conta" : "Criar uma conta") + '</button>' +
-    '</div>';
+    '</div><p class="center faint" style="margin-top:18px"><a href="privacidade.html" target="_blank" rel="noopener">Privacidade</a> · <a href="termos.html" target="_blank" rel="noopener">Termos</a> · <a href="excluir-conta.html" target="_blank" rel="noopener">Excluir conta</a></p>';
 }
 function fazerAuth(){
   var email = $("aEmail").value.trim(), senha = $("aSenha").value, nome = $("aNome") ? $("aNome").value.trim() : "";
   var err = $("aErr"); err.className = "err"; err.textContent = "";
   if (!email || !senha){ err.textContent = "Preencha e-mail e senha."; return; }
   if (S.authModo === "cadastro" && !nome){ err.textContent = "Diga seu nome."; return; }
+  if (S.authModo === "cadastro" && senha.length < 8){ err.textContent = "A senha precisa ter pelo menos 8 caracteres."; return; }
   $("aOk").disabled = true;
   var op = S.authModo === "cadastro"
     ? sb.auth.signUp({ email: email, password: senha, options: { data: { full_name: nome } } })
@@ -424,6 +433,7 @@ function abrirMenu(){
     item("irPerfil", "👤 Meu perfil") + item("abrirPessoal", "📒 Meu catálogo") +
     item("irNotif", "🔔 Notificações" + (S.naoLidas ? ' <span class="badge">' + S.naoLidas + '</span>' : '')) +
     item("irAmigos", "👥 Amigos" + (pend ? ' <span class="badge">' + pend + '</span>' : '')) +
+    item("irConta", "🛡️ Conta e privacidade") + (S.ehAdmin ? item("irDenuncias", "🚩 Denúncias") : "") +
     '<hr style="margin:4px 0">' + item("sair", "↪ Sair") + '</div>';
   m.addEventListener("click", function(e){ if (e.target === m) fecharMenu(); });
   document.body.appendChild(m);
@@ -554,7 +564,9 @@ function viewPerfilPublico(id){
       '<div class="center"><div class="title" style="font-size:20px">' + esc(p.nome || "Alguém") + '</div>' +
         (localPerfil(p) ? '<div class="muted">📍 ' + esc(localPerfil(p)) + '</div>' : '') +
         '<div style="margin-top:8px"><span class="nivel">⭐ Nível ' + p.nivel + ' · ' + esc(nomeNivel(p.nivel)) + ' · ' + p.pontos + ' pts</span></div></div>' +
-      (eu ? '<p class="faint center" style="margin:10px 0 0">É assim que as outras pessoas veem você.</p>' : '') +
+      (eu ? '<p class="faint center" style="margin:10px 0 0">É assim que as outras pessoas veem você.</p>'
+          : '<div class="row" style="justify-content:center;gap:8px;margin-top:12px"><button class="btn sec small" data-act="sheetDenunciar" data-t="perfil" data-id="' + esc(p.id) + '">🚩 Denunciar</button>' +
+            '<button class="btn sec small" data-act="sheetBloquear" data-u="' + esc(p.id) + '" data-n="' + esc(p.nome || "") + '">🚫 Bloquear</button></div>') +
       '<h3 style="margin:20px 0 8px">Catálogos públicos</h3>';
     if (!(p.catalogos || []).length){
       h += '<div class="empty" style="padding:18px 0">' + (eu ? "Você ainda não tem catálogos públicos.<br>Em <b>Compartilhar</b> dentro de um catálogo, escolha Público." : "Nenhum catálogo público ainda.") + '</div>';
@@ -580,7 +592,8 @@ function renderApoio(){
     '<div class="chips" style="margin-top:12px">' +
       '<button class="chip react ' + (i.eu_coracao ? "on" : "") + '" data-act="reagir" data-t="coracao">❤️ ' + i.coracoes + '</button>' +
       '<button class="chip react ' + (i.eu_like ? "on" : "") + '" data-act="reagir" data-t="like">👍 ' + i.likes + '</button></div>' +
-    '<div class="faint" style="margin-top:6px">Apoie este catálogo com um coração ou um like.</div></div>';
+    '<div class="faint" style="margin-top:6px">Apoie este catálogo com um coração ou um like.</div>' +
+    '<div style="margin-top:8px"><button class="btn sec small" data-act="sheetDenunciar" data-t="catalogo" data-id="' + esc(i.id) + '">🚩 Denunciar catálogo</button></div></div>';
   carregarImagens(box);
 }
 function reagir(tipo){
@@ -653,6 +666,10 @@ function entrarGrupo(codigo, silencioso){
       if (silencioso){ toast(traduzErro(r.error)); return null; }
       $("gOk").disabled = false; $("gErr").textContent = traduzErro(r.error); return null;
     }
+    if (!r.data){
+      if (silencioso){ toast("Código de convite inválido."); return null; }
+      $("gOk").disabled = false; $("gErr").textContent = "Código de convite inválido."; return null;
+    }
     fecharSheet();
     return carregarGrupos().then(function(){ S.grupo = null; go("#/g/" + r.data); });
   });
@@ -660,10 +677,13 @@ function entrarGrupo(codigo, silencioso){
 
 /* ---------- QR code de amizade ---------- */
 var scriptsCarregados = {}, URL_QRGEN = "https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js", URL_JSQR = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js";
+var SRI_SCRIPTS = {};
+SRI_SCRIPTS[URL_QRGEN] = "sha384-8FWZA6BGMXhsfO+BLtrJK0We6gg5o1JyO8xQm6peWDEUs17ACA5ziE/NIAkl9z2k";
+SRI_SCRIPTS[URL_JSQR] = "sha384-b5Ya4Bq3qCyz39m2ISh+4DxjAIljdeFwK/BsXLuj9gugaNwAcj/ia15fxNZL9Nlx";
 function carregarScript(url){
   if (scriptsCarregados[url]) return scriptsCarregados[url];
   scriptsCarregados[url] = new Promise(function(res, rej){
-    var sc = document.createElement("script"); sc.src = url; sc.onload = function(){ res(); };
+    var sc = document.createElement("script"); sc.src = url; sc.integrity = SRI_SCRIPTS[url] || ""; sc.crossOrigin = "anonymous"; sc.onload = function(){ res(); };
     sc.onerror = function(){ delete scriptsCarregados[url]; rej(new Error("Não consegui carregar o leitor de QR code agora.")); };
     document.head.appendChild(sc);
   });
@@ -722,8 +742,7 @@ function fecharScanner(){
 }
 function adicionarPorCodigo(cod){
   return sb.rpc("adicionar_amigo", { p_codigo: cod }).then(function(r){
-    toast(r.error ? (/proprio/.test(r.error.message) ? "Esse é o seu próprio código." : "Código de amigo inválido.")
-      : r.data === "pendente" ? "Pedido de amizade enviado." : "Agora vocês são amigos no Rolê!");
+    toast(r.error ? (/proprio/.test(r.error.message) ? "Esse é o seu próprio código." : "Código de amigo inválido.") : r.data === "invalido" ? "Código de amigo inválido." : r.data === "pendente" ? "Pedido de amizade enviado." : "Agora vocês são amigos no Rolê!");
     return carregarAmigos().then(function(){ if (/#\/amigos/.test(location.hash)) renderAmigos(); }, function(){});
   });
 }
@@ -750,8 +769,111 @@ function abrirIntegrantes(){
   carregarImagens($("sheet"));
 }
 
+/* ---------- conta, privacidade, bloqueios e denúncias ---------- */
+var MOTIVOS_DENUNCIA = [["spam", "Spam ou propaganda"], ["assedio", "Assédio ou comportamento abusivo"], ["conteudo_improprio", "Conteúdo impróprio"], ["falso", "Informação falsa ou perfil falso"], ["outro", "Outro motivo"]];
+function viewConta(){
+  limparMapaGrupo();
+  app.innerHTML = '<div class="top"><button class="iconbtn" data-act="irGrupos">‹</button><h1>Conta e privacidade</h1></div><p class="empty">Carregando…</p>';
+  sb.rpc("listar_bloqueios").then(function(r){
+    var lista = r.error ? [] : (r.data || []);
+    var h = '<div class="top"><button class="iconbtn" data-act="irGrupos">‹</button><h1>Conta e privacidade</h1></div>' +
+      '<div class="card"><div class="title">' + esc((S.perfis[S.user.id] || {}).nome || "Minha conta") + '</div><div class="faint">' + esc(S.user.email || "") + '</div></div>' +
+      '<h3 style="margin:16px 0 8px">Pessoas bloqueadas</h3>';
+    if (!lista.length) h += '<div class="empty" style="padding:14px 0">Você não bloqueou ninguém.</div>';
+    else h += lista.map(function(b){
+      return '<div class="card"><div class="row"><div class="grow"><div class="title">' + esc(b.nome || "Alguém") + '</div></div>' +
+        '<button class="btn sec small" data-act="desbloquear" data-u="' + esc(b.user_id) + '">Desbloquear</button></div></div>';
+    }).join("");
+    h += '<h3 style="margin:16px 0 8px">Documentos</h3>' +
+      '<div class="card"><a href="privacidade.html" target="_blank" rel="noopener">Política de Privacidade ↗</a></div>' +
+      '<div class="card"><a href="termos.html" target="_blank" rel="noopener">Termos de Uso ↗</a></div>' +
+      '<h3 style="margin:16px 0 8px">Excluir conta</h3>' +
+      '<div class="card"><div class="muted" style="margin-bottom:10px">Apaga seu perfil, avaliações, fotos e catálogo pessoal. Em grupos compartilhados, os outros integrantes continuam com o que registraram juntos. Não dá para desfazer.</div>' +
+      '<button class="btn sec" data-act="sheetExcluir">Excluir minha conta</button></div>';
+    app.innerHTML = h;
+  });
+}
+function sheetBloquear(uid, nome){
+  abrirSheet('<h2 style="margin-bottom:8px">Bloquear ' + esc(nome || "este usuário") + '?</h2><div class="muted" style="margin-bottom:14px">Vocês deixam de ser amigos, a pessoa não consegue mais te adicionar e vocês não veem o perfil um do outro. Você pode desbloquear depois em Conta e privacidade.</div>' +
+    '<div class="stack"><button class="btn" data-act="bloquear" data-u="' + esc(uid) + '">Bloquear</button><button class="btn sec" data-act="fecharSheet">Cancelar</button></div>');
+}
+function bloquear(uid){
+  sb.rpc("bloquear_usuario", { p_user: uid }).then(function(r){
+    if (r.error){ toast(traduzErro(r.error)); return; }
+    fecharSheet(); toast("Usuário bloqueado.");
+    carregarAmigos().then(function(){}, function(){});
+    go("#/grupos");
+  });
+}
+function desbloquear(uid){
+  sb.rpc("desbloquear_usuario", { p_user: uid }).then(function(r){
+    if (r.error){ toast(traduzErro(r.error)); return; }
+    toast("Usuário desbloqueado."); viewConta();
+  });
+}
+function sheetDenunciar(tipo, alvo){
+  abrirSheet('<h2 style="margin-bottom:8px">Denunciar</h2><div class="muted" style="margin-bottom:12px">Nossa equipe vai analisar. A pessoa denunciada não é avisada.</div><div class="stack">' +
+    '<div><label class="f" for="dMotivo">Motivo</label><select id="dMotivo">' + MOTIVOS_DENUNCIA.map(function(m){ return '<option value="' + m[0] + '">' + esc(m[1]) + '</option>'; }).join("") + '</select></div>' +
+    '<div><label class="f" for="dDet">Detalhes (opcional)</label><textarea id="dDet" maxlength="500"></textarea></div>' +
+    '<div class="err" id="dErr"></div><button class="btn" id="dOk" data-act="enviarDenuncia" data-t="' + esc(tipo) + '" data-id="' + esc(alvo) + '">Enviar denúncia</button></div>');
+}
+function enviarDenuncia(tipo, alvo){
+  var b = $("dOk"); b.disabled = true;
+  sb.rpc("denunciar", { p_tipo: tipo, p_alvo: alvo, p_motivo: $("dMotivo").value, p_detalhe: $("dDet").value.trim() || null }).then(function(r){
+    if (r.error){ b.disabled = false; $("dErr").textContent = traduzErro(r.error); return; }
+    fecharSheet(); toast("Denúncia enviada. Obrigado.");
+  });
+}
+function viewDenuncias(){
+  limparMapaGrupo();
+  app.innerHTML = '<div class="top"><button class="iconbtn" data-act="irGrupos">‹</button><h1>Denúncias</h1></div><p class="empty">Carregando…</p>';
+  sb.rpc("listar_denuncias").then(function(r){
+    if (r.error){ toast(traduzErro(r.error)); return go("#/grupos"); }
+    var lista = r.data || [], h = '<div class="top"><button class="iconbtn" data-act="irGrupos">‹</button><h1>Denúncias</h1></div>';
+    if (!lista.length) h += '<div class="empty">Nenhuma denúncia.</div>';
+    h += lista.map(function(d){
+      var mot = MOTIVOS_DENUNCIA.filter(function(m){ return m[0] === d.motivo; })[0];
+      return '<div class="card"><div class="title">' + esc(d.tipo) + (d.alvo_nome ? ': ' + esc(d.alvo_nome) : '') + ' <span class="tag">' + esc(d.status) + '</span></div>' +
+        '<div class="muted">' + esc(mot ? mot[1] : d.motivo) + '</div>' + (d.detalhe ? '<div style="margin-top:6px">' + esc(d.detalhe) + '</div>' : '') +
+        '<div class="faint">Por ' + esc(d.denunciante_nome || "—") + ' · ' + esc(tempoRelativo(d.created_at)) + '</div>' +
+        '<div class="row" style="gap:8px;margin-top:8px">' + (d.tipo === "perfil" && d.alvo_id ? '<button class="btn sec small" data-act="abrirPerfil" data-u="' + esc(d.alvo_id) + '">Ver perfil</button>' : '') +
+        (d.tipo === "catalogo" && d.alvo_id ? '<button class="btn sec small" data-act="abrirPublico" data-id="' + esc(d.alvo_id) + '">Ver catálogo</button>' : '') +
+        (d.status === "nova" ? '<button class="btn small" data-act="resolverDenuncia" data-id="' + esc(d.id) + '" data-st="analisada">Analisada</button><button class="btn sec small" data-act="resolverDenuncia" data-id="' + esc(d.id) + '" data-st="descartada">Descartar</button>' : '') +
+        '</div></div>';
+    }).join("");
+    app.innerHTML = h;
+  });
+}
+function resolverDenuncia(id, st){
+  sb.rpc("resolver_denuncia", { p_id: id, p_status: st }).then(function(r){ if (r.error) toast(traduzErro(r.error)); else viewDenuncias(); });
+}
+function sheetExcluirConta(){
+  abrirSheet('<h2 style="margin-bottom:8px">Excluir minha conta</h2><div class="muted" style="margin-bottom:12px">Isso apaga seu perfil, suas avaliações, suas fotos e seu catálogo pessoal. Não dá para desfazer. Para confirmar, digite <b>EXCLUIR</b>.</div>' +
+    '<div class="stack"><input type="text" id="xConf" autocapitalize="characters" autocomplete="off" placeholder="EXCLUIR"><div class="err" id="xErr"></div>' +
+    '<button class="btn" id="xOk" data-act="excluirConta">Excluir definitivamente</button><button class="btn sec" data-act="fecharSheet">Cancelar</button></div>');
+}
+function excluirConta(){
+  if (($("xConf").value || "").trim().toUpperCase() !== "EXCLUIR"){ $("xErr").textContent = "Digite EXCLUIR para confirmar."; return; }
+  var b = $("xOk"); b.disabled = true; b.textContent = "Excluindo…"; $("xErr").textContent = "";
+  var uid = S.user.id;
+  Promise.all([ sb.from("fotos").select("caminho").eq("criado_por", uid), sb.from("perfis").select("avatar_url").eq("id", uid).maybeSingle() ]).then(function(rs){
+    var cam = (rs[0].data || []).map(function(x){ return x.caminho; });
+    cam = cam.concat(cam.map(pathThumb));
+    var av = rs[1].data && rs[1].data.avatar_url, tarefas = [];
+    if (cam.length) tarefas.push(sb.storage.from("fotos").remove(cam));
+    if (av) tarefas.push(sb.storage.from("avatares").remove([av]));
+    return Promise.all(tarefas.map(function(t){ return t.then(function(){}, function(){}); }));
+  }).then(function(){ return sb.rpc("excluir_minha_conta"); }).then(function(r){
+    if (r.error) throw r.error;
+    ["role_notif_dispensado", "role_fcm_token", "role_convite", "role_amigo", "role_publico"].forEach(function(k){ lsSet(k, null); });
+    return sb.auth.signOut({ scope: "local" }).then(function(){}, function(){});
+  }).then(function(){ fecharSheet(); toast("Conta excluída."); }).catch(function(e){
+    b.disabled = false; b.textContent = "Excluir definitivamente"; $("xErr").textContent = traduzErro(e);
+  });
+}
+
 /* ---------- notificações ---------- */
-var NOTIF_ICONES = { amizade_pedido: "👥", amizade_aceita: "🤝", role_adicionado: "🎉", role_lembrete: "⏰", avaliacao_nova: "⭐", grupo_adicionado: "👥", grupo_entrou: "👋", curtida: "❤️" };
+var NOTIF_ICONES = { denuncia: "🚩", amizade_pedido: "👥", amizade_aceita: "🤝", role_adicionado: "🎉", role_lembrete: "⏰", avaliacao_nova: "⭐", grupo_adicionado: "👥", grupo_entrou: "👋", curtida: "❤️" };
 function tempoRelativo(iso){
   var s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
   if (s < 60) return "agora";
@@ -1004,6 +1126,7 @@ function adicionarAmigo(){
       err.textContent = /proprio/.test(r.error.message) ? "Esse é o seu próprio código." : /invalido/.test(r.error.message) ? "Código de amigo inválido." : traduzErro(r.error);
       return;
     }
+    if (r.data === "invalido"){ err.textContent = "Código de amigo inválido."; return; }
     toast(r.data === "aceita" ? "Agora vocês são amigos no Rolê!" : "Pedido de amizade enviado.");
     carregarAmigos().then(renderAmigos);
   });
@@ -2193,6 +2316,17 @@ document.addEventListener("click", function(e){
     case "fotoNext": S.lb.i = (S.lb.i + 1) % S.lb.caminhos.length; return mostrarFoto();
     case "irAmigos": return go("#/amigos");
     case "irNotif": return go("#/notificacoes");
+    case "fecharSheet": return fecharSheet();
+    case "irConta": fecharMenu(); return go("#/conta");
+    case "irDenuncias": fecharMenu(); return go("#/denuncias");
+    case "sheetBloquear": return sheetBloquear(d.u, d.n);
+    case "bloquear": return bloquear(d.u);
+    case "desbloquear": return desbloquear(d.u);
+    case "sheetDenunciar": return sheetDenunciar(d.t, d.id);
+    case "enviarDenuncia": return enviarDenuncia(d.t, d.id);
+    case "sheetExcluir": return sheetExcluirConta();
+    case "excluirConta": return excluirConta();
+    case "resolverDenuncia": return resolverDenuncia(d.id, d.st);
     case "abrirNotif": return abrirNotificacao(d.id, d.link);
     case "notifTodasLidas": return sb.rpc("marcar_todas_lidas").then(function(){ S.naoLidas = 0; atualizarBadgeNotif(); viewNotificacoes(); });
     case "notifAtivar":
@@ -2310,8 +2444,9 @@ function recarregarApp(){ location.reload(); }
 
 /* ---------- sessão ---------- */
 function iniciar(user){
-  S.user = user; S.grupo = null; S._grupoAuto = false;
+  S.user = user; S.grupo = null; S._grupoAuto = false; S.ehAdmin = false;
   iniciarNotificacoes();
+  sb.from("admins").select("user_id").eq("user_id", user.id).maybeSingle().then(function(r){ S.ehAdmin = !!(r && r.data); }, function(){});
   var conv = lsGet("role_convite");
   var p = sb.rpc("garantir_catalogo_pessoal").then(function(){}, function(){}).then(function(){ return carregarGrupos(); });
   if (conv){
@@ -2329,8 +2464,7 @@ function iniciar(user){
     if (am){
       lsSet("role_amigo", null);
       return sb.rpc("adicionar_amigo", { p_codigo: am }).then(function(r){
-        toast(r.error ? (/proprio/.test(r.error.message) ? "Esse é o seu próprio código." : "Código de amigo inválido.")
-          : r.data === "aceita" ? "Agora vocês são amigos no Rolê!" : "Pedido de amizade enviado.");
+        toast(r.error ? (/proprio/.test(r.error.message) ? "Esse é o seu próprio código." : "Código de amigo inválido.") : r.data === "invalido" ? "Código de amigo inválido." : r.data === "aceita" ? "Agora vocês são amigos no Rolê!" : "Pedido de amizade enviado.");
         return carregarAmigos().then(function(){}, function(){});
       }).then(function(){ go("#/amigos"); });
     }
