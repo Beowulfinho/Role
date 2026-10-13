@@ -772,6 +772,10 @@ function contarNaoLidas(){
 }
 function iniciarNotificacoes(){
   contarNaoLidas();
+  if (appNativo() && pluginPush()){
+    ligarPushNativo();
+    pluginPush().checkPermissions().then(function(p){ if (p.receive === "granted") pluginPush().register(); }).catch(function(){});
+  }
   if (S.canalNotif){ try { sb.removeChannel(S.canalNotif); } catch(e){} S.canalNotif = null; }
   try {
     S.canalNotif = sb.channel("notif-" + S.user.id).on("postgres_changes",
@@ -785,11 +789,40 @@ function iniciarNotificacoes(){
 }
 
 /* ---- push no aparelho ---- */
+function appNativo(){ return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()); }
+function pluginPush(){ return appNativo() && window.Capacitor.Plugins ? window.Capacitor.Plugins.PushNotifications : null; }
+var _fcmEsperando = null;
+function ligarPushNativo(){
+  var P = pluginPush(); if (!P || ligarPushNativo._ok) return; ligarPushNativo._ok = true;
+  P.addListener("registration", function(t){
+    lsSet("role_fcm_token", t.value);
+    if (!S.user) return;
+    sb.rpc("salvar_push", { p_endpoint: "fcm:" + t.value, p_p256dh: "fcm", p_auth: "fcm", p_ua: "Rolê Android" }).then(function(r){
+      if (_fcmEsperando){ var f = _fcmEsperando; _fcmEsperando = null; r.error ? f.rej(r.error) : f.ok(); }
+    });
+  });
+  P.addListener("registrationError", function(e){
+    if (_fcmEsperando){ var f = _fcmEsperando; _fcmEsperando = null; f.rej(new Error("Não consegui registrar este aparelho para notificações.")); }
+  });
+  P.addListener("pushNotificationActionPerformed", function(a){
+    var d = (a && a.notification && a.notification.data) || {};
+    if (d.id) sb.from("notificacoes").update({ lida: true }).eq("id", d.id).then(function(){ contarNaoLidas(); });
+    if (d.link) go(d.link);
+  });
+  if (P.createChannel) P.createChannel({ id: "role_avisos", name: "Avisos do Rolê", importance: 5, visibility: 1, vibration: true }).catch(function(){});
+}
 function pushSuportado(){
+  if (appNativo()) return !!pluginPush();
   return !!(window.isSecureContext && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window);
 }
 function estadoPush(){
   if (!pushSuportado()) return Promise.resolve({ suportado: false });
+  if (appNativo()){
+    return pluginPush().checkPermissions().then(function(p){
+      var perm = p.receive === "granted" ? "granted" : p.receive === "denied" ? "denied" : "default";
+      return { suportado: true, nativo: true, permissao: perm, inscrito: perm === "granted" && !!lsGet("role_fcm_token") };
+    }).catch(function(){ return { suportado: false }; });
+  }
   return navigator.serviceWorker.getRegistration().then(function(reg){
     if (!reg) return { suportado: true, permissao: Notification.permission, inscrito: false };
     return reg.pushManager.getSubscription().then(function(sub){
@@ -804,6 +837,17 @@ function chaveParaBytes(b64){
 }
 function ativarPush(){
   if (!pushSuportado()) return Promise.reject(new Error("Este aparelho não recebe notificações push."));
+  if (appNativo()){
+    var P = pluginPush(); ligarPushNativo();
+    return P.requestPermissions().then(function(p){
+      if (p.receive !== "granted") throw new Error("Permissão negada. Libere as notificações nas configurações do Android.");
+      return new Promise(function(ok, rej){
+        _fcmEsperando = { ok: ok, rej: rej };
+        setTimeout(function(){ if (_fcmEsperando){ _fcmEsperando = null; rej(new Error("Demorou para registrar. Tente de novo.")); } }, 15000);
+        P.register();
+      });
+    }).then(function(){ lsSet("role_notif_dispensado", null); });
+  }
   return Notification.requestPermission().then(function(perm){
     if (perm !== "granted") throw new Error("Permissão negada. Libere as notificações nas configurações do site.");
     return Promise.all([ navigator.serviceWorker.ready, sb.rpc("vapid_publica") ]);
@@ -822,6 +866,11 @@ function ativarPush(){
   });
 }
 function desativarPush(){
+  if (appNativo()){
+    var tk = lsGet("role_fcm_token"); lsSet("role_fcm_token", null);
+    var P = pluginPush();
+    return (tk ? sb.rpc("remover_push", { p_endpoint: "fcm:" + tk }) : Promise.resolve()).then(function(){ return P && P.unregister ? P.unregister() : null; });
+  }
   return navigator.serviceWorker.getRegistration().then(function(reg){
     return reg ? reg.pushManager.getSubscription() : null;
   }).then(function(sub){
@@ -831,6 +880,11 @@ function desativarPush(){
   });
 }
 function testarPush(){
+  if (appNativo()){
+    var LN = window.Capacitor.Plugins.LocalNotifications;
+    if (!LN) return Promise.reject(new Error("indisponível neste app"));
+    return LN.schedule({ notifications: [{ id: 1, title: "Rolê", body: "Teste: as notificações estão funcionando neste aparelho.", schedule: { at: new Date(Date.now() + 500) } }] });
+  }
   return navigator.serviceWorker.ready.then(function(reg){
     return reg.showNotification("Rolê", { body: "Teste: as notificações estão funcionando neste aparelho.", icon: "icon-192.png", badge: "badge-96.png", tag: "teste", data: { link: "#/notificacoes" } });
   });
@@ -845,7 +899,7 @@ function htmlPushCard(ep){
   }
   if (ep.inscrito && ep.permissao === "granted"){
     return h + '<div class="muted" style="margin:6px 0 10px">Ativados neste aparelho: você recebe os avisos mesmo com o app fechado.</div>' +
-      '<div class="row" style="gap:8px"><button class="btn sec small" data-act="notifTestar">Enviar teste</button><button class="btn sec small" data-act="notifDesativar">Desativar</button></div></div>';
+      '<div class="row" style="gap:8px">' + (ep.nativo ? "" : '<button class="btn sec small" data-act="notifTestar">Enviar teste</button>') + '<button class="btn sec small" data-act="notifDesativar">Desativar</button></div></div>';
   }
   return h + '<div class="muted" style="margin:6px 0 10px">Receba no celular: rolê em que você foi adicionado, avaliações pendentes, pedidos de amizade e mais.</div>' +
     '<button class="btn" data-act="notifAtivar">Ativar notificações</button></div>';
