@@ -164,6 +164,8 @@ function traduzErro(e){
   if (/Password should be/i.test(m)) return "A senha precisa ter pelo menos 6 caracteres.";
   if (/codigo invalido/i.test(m)) return "Código de convite inválido.";
   if (/Email not confirmed/i.test(m)) return "Confirme seu e-mail antes de entrar.";
+  if (/outro grupo usa/i.test(m)) return "Outro grupo usa este lugar, então não dá para mesclar por aqui.";
+  if (/sem permissao/i.test(m)) return "Você não tem permissão para mesclar este lugar.";
   if (/rate limit/i.test(m)) return "Muitas tentativas. Espere um pouco e tente de novo.";
   return m;
 }
@@ -216,7 +218,7 @@ function carregarGrupo(id){
     S.lugares = (rs[0].data || []).map(function(l){
       var lo = l.locais || {};
       l.nome = lo.nome; l.categoria = lo.categoria; l.bairro = lo.bairro; l.cidade = lo.cidade;
-      l.lat = lo.lat; l.lng = lo.lng; l.precisao = lo.precisao; l.local_criado_por = lo.criado_por;
+      l.lat = lo.lat; l.lng = lo.lng; l.precisao = lo.precisao; l.local_criado_por = lo.criado_por; l.privado = !!lo.privado;
       return l;
     });
     S.membros = rs[1].data || [];
@@ -482,10 +484,10 @@ function viewFormLugar(id){
   if (l){
     S.form = { modo: "editar", id: id, localId: l.local_id, nome: l.nome, categoria: l.categoria, bairro: l.bairro || "",
       cidade: l.cidade || "", lat: l.lat, lng: l.lng, precisao: l.precisao, estado: l.estado,
-      atributos: (l.atributos || []).slice(), maps: l.maps_url || "", editavelLocal: l.local_criado_por === S.user.id };
+      atributos: (l.atributos || []).slice(), maps: l.maps_url || "", privado: !!l.privado, editavelLocal: l.local_criado_por === S.user.id };
   } else {
     S.form = { modo: "busca", nome: "", categoria: "restaurante", bairro: "", cidade: lsGet("role_cidade") || "",
-      lat: null, lng: null, precisao: "desconhecida", estado: "ja_fomos", atributos: [], maps: "", sugs: [] };
+      lat: null, lng: null, precisao: "desconhecida", estado: "ja_fomos", atributos: [], maps: "", privado: false, sugs: [] };
   }
   renderForm();
   if (!l) pedirLocalizacao(function(){ buscarLocais(); });
@@ -513,7 +515,9 @@ function htmlCamposLocal(f){
       '<div class="grow"><label class="f" for="fCidade">Cidade</label><input type="text" id="fCidade" value="' + esc(f.cidade) + '"></div></div>' +
     '<div><label class="f">Localização</label><div id="mapa" class="map"></div>' +
       '<div class="row" style="margin-top:8px"><span class="faint grow" id="mapStatus"></span><button class="btn sec small" data-act="usarLoc">📍 Minha localização</button></div>' +
-      '<div class="faint">Toque no mapa ou arraste o pin até o lugar certo.</div></div>';
+      '<div class="faint">Toque no mapa ou arraste o pin até o lugar certo.</div></div>' +
+    '<div><label class="f">Visibilidade</label><div class="chips"><button class="chip ' + (f.privado ? "on" : "") + '" data-act="fPrivado">🔒 Lugar privado (só quem usa no grupo vê)</button></div>' +
+    '<div class="faint" style="margin-top:6px">Use para casas, locais pessoais ou o que não deve aparecer no catálogo de todos.</div></div>';
 }
 function renderForm(){
   var f = S.form;
@@ -534,7 +538,10 @@ function renderForm(){
     h += '<div class="card"><div class="title">' + esc(f.nome) + '</div><div class="muted">' + resumoLocal(f) + '</div>' +
       '<div class="faint" style="margin-top:6px">Nome e localização só podem ser mudados por quem cadastrou o lugar, e só enquanto nenhum outro grupo o usa.</div></div>' + htmlCamposGrupo(f);
   }
-  if (f.modo === "editar") h += '<button class="btn danger" data-act="apagarLugar">Remover do grupo</button>';
+  if (f.modo === "editar"){
+    h += '<hr><div class="faint">Este lugar está duplicado no catálogo?</div><button class="btn sec" data-act="mesclar">Mesclar com outro lugar</button>';
+    h += '<button class="btn danger" data-act="apagarLugar">Remover do grupo</button>';
+  }
   h += '</div>';
   app.innerHTML = h;
   if (f.modo === "busca"){
@@ -639,7 +646,7 @@ function salvarLugar(){
     var cidade = $("fCidade").value.trim();
     if (cidade) lsSet("role_cidade", cidade);
     local = { nome: nome, categoria: f.categoria, bairro: $("fBairro").value.trim() || null, cidade: cidade || null,
-      lat: f.lat, lng: f.lng, precisao: f.lat == null ? "desconhecida" : f.precisao };
+      lat: f.lat, lng: f.lng, precisao: f.lat == null ? "desconhecida" : f.precisao, privado: !!f.privado };
   }
   $("fOk").disabled = true;
   var novo = f.modo !== "editar", compartilhado = false, p;
@@ -676,6 +683,43 @@ function apagarLugar(){
   sb.from("lugares").delete().eq("id", l.id).then(function(r){
     if (r.error){ toast(traduzErro(r.error)); return; }
     carregarGrupo(S.grupo.id).then(function(){ go("#/g/" + S.grupo.id); });
+  });
+}
+
+/* ---------- mesclar duplicados ---------- */
+var mesclaTimer = null, mesclaSeq = 0;
+function abrirMesclar(){
+  var f = S.form; S.mesclaSugs = [];
+  abrirSheet('<h2 style="margin-bottom:6px">Mesclar duplicado</h2>' +
+    '<p class="muted" style="margin-top:0">Procure o lugar correto. As visitas e avaliações de "' + esc(f.nome) + '" serão movidas para ele e este deixa de aparecer.</p>' +
+    '<input type="text" id="mBusca" placeholder="Nome do lugar correto" autocomplete="off"><div id="mRes" style="margin-top:10px"></div>');
+  $("mBusca").focus();
+  $("mBusca").addEventListener("input", function(){
+    clearTimeout(mesclaTimer);
+    mesclaTimer = setTimeout(function(){
+      var q = $("mBusca") ? $("mBusca").value.trim() : "", seq = ++mesclaSeq;
+      if (q.length < 2){ $("mRes").innerHTML = ""; return; }
+      sb.rpc("buscar_locais", { p_nome: q, p_lat: null, p_lng: null, p_raio: 100000 }).then(function(r){
+        if (seq !== mesclaSeq || !$("mRes")) return;
+        S.mesclaSugs = (r.data || []).filter(function(x){ return x.id !== f.localId; });
+        $("mRes").innerHTML = S.mesclaSugs.length ? S.mesclaSugs.map(function(x){
+          return '<div class="card click" data-act="mesclarPara" data-id="' + esc(x.id) + '"><div class="title">' + esc(x.nome) + '</div><div class="muted">' + resumoLocal(x) + '</div></div>';
+        }).join("") : '<div class="faint">Nada encontrado.</div>';
+      });
+    }, 300);
+  });
+}
+function mesclarPara(destinoId){
+  var f = S.form, x = (S.mesclaSugs || []).filter(function(s){ return s.id === destinoId; })[0]; if (!x) return;
+  if (!confirm("Mover tudo de \"" + f.nome + "\" para \"" + x.nome + "\"? Isso não dá para desfazer.")) return;
+  sb.rpc("mesclar_locais", { p_origem: f.localId, p_destino: destinoId }).then(function(r){
+    if (r.error){ toast(traduzErro(r.error)); return; }
+    fecharSheet();
+    carregarGrupo(S.grupo.id).then(function(){
+      var l = S.lugares.filter(function(z){ return z.local_id === destinoId; })[0];
+      toast("Lugares mesclados.");
+      go(l ? "#/g/" + S.grupo.id + "/lugar/" + l.id : "#/g/" + S.grupo.id);
+    });
   });
 }
 
@@ -802,6 +846,9 @@ document.addEventListener("click", function(e){
       if (i >= 0) S.form.atributos.splice(i, 1); else S.form.atributos.push(d.v);
       return marcar(el.parentNode, el, true);
     case "usarLoc": return usarLocalizacao();
+    case "fPrivado": S.form.privado = !S.form.privado; return el.classList.toggle("on", S.form.privado);
+    case "mesclar": return abrirMesclar();
+    case "mesclarPara": return mesclarPara(d.id);
     case "pickLocal": return pickLocal(d.id);
     case "novoLocal": return novoLocal();
     case "voltaBusca": S.form.modo = "busca"; return renderForm() || buscarLocais();
