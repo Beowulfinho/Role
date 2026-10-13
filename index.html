@@ -153,6 +153,13 @@
   #ptr span{display:block;line-height:1}
   #ptr.gira span{animation:ptrgira .8s linear infinite}
   @keyframes ptrgira{to{transform:rotate(360deg)}}
+  .avatar{overflow:hidden;flex:none}
+  .avatar img{width:100%;height:100%;object-fit:cover;display:block}
+  .nivel{display:inline-block;background:var(--accent-soft);color:var(--accent);border-radius:999px;padding:2px 10px;font-size:12.5px;font-weight:700;white-space:nowrap}
+  .nivel-card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;box-shadow:var(--shadow)}
+  .barra{height:8px;border-radius:999px;background:var(--line);overflow:hidden;margin:10px 0 6px}
+  .barra span{display:block;height:100%;background:var(--accent);border-radius:999px}
+  .chip.react{font-size:15px;padding:8px 16px}
   .rev{border-top:1px solid var(--line);padding-top:10px;margin-top:10px}
   .rev:first-child{border-top:0;padding-top:0;margin-top:0}
 </style>
@@ -227,6 +234,8 @@ function traduzErro(e){
   if (/Email not confirmed/i.test(m)) return "Confirme seu e-mail antes de entrar.";
   if (/outro grupo usa/i.test(m)) return "Outro grupo usa este lugar, então não dá para mesclar por aqui.";
   if (/sem permissao/i.test(m)) return "Você não tem permissão para mesclar este lugar.";
+  if (/proprio catalogo/i.test(m)) return "Você não pode apoiar o seu próprio catálogo.";
+  if (/catalogo nao publico/i.test(m)) return "Este catálogo não é mais público.";
   if (/Failed to fetch|NetworkError|Load failed/i.test(m)) return "Sem conexão com a internet.";
   if (/rate limit/i.test(m)) return "Muitas tentativas. Espere um pouco e tente de novo.";
   return m;
@@ -303,6 +312,7 @@ function route(){
   if (r === "publico" && p[1]) return viewPublico(p[1]);
   if (r === "amigos") return viewAmigos();
   if (r === "perfil") return viewPerfil();
+  if (r === "u" && p[1]) return viewPerfilPublico(p[1]);
   if (r === "g" && p[1]){
     var gid = p[1];
     var pronto = (S.grupo && S.grupo.id === gid && !S.somenteLeitura) ? Promise.resolve() : (app.innerHTML = '<p class="empty">Carregando…</p>', carregarGrupo(gid));
@@ -361,7 +371,7 @@ function viewGrupos(){
   var pend = pedidosRecebidos().length;
   var h = '<div class="top">' + htmlMarca() + '<h1>Seus grupos</h1><button class="iconbtn" data-act="menu" aria-label="Menu" style="position:relative;font-size:20px;line-height:1">⋮' +
     (pend ? '<span class="dot"></span>' : '') + '</button></div>';
-  if (nome) h += '<p class="muted" style="margin-top:0">Olá, ' + esc(nome) + '!</p>';
+  h += '<p class="muted" id="saudacao" style="margin-top:0">' + saudacaoHtml() + '</p>';
   var lista = S.grupos.filter(function(g){ return g.tipo !== "pessoal"; });
   if (!lista.length){
     h += '<div class="empty"><div class="big">👫</div>Crie um grupo para o casal ou os amigos,<br>ou entre com um código de convite.</div>';
@@ -374,7 +384,7 @@ function viewGrupos(){
     '<button class="btn" data-act="sheetCriar">Criar grupo</button>' +
     '<button class="btn sec" data-act="sheetEntrar">Entrar com código</button></div>';
   app.innerHTML = h;
-  if (S.grupos.length === 1 && S.grupos[0].tipo !== "pessoal" && !S._grupoAuto){ S._grupoAuto = true; go("#/g/" + S.grupos[0].id); }
+  atualizarSaudacao();
 }
 
 /* ---------- menu ⋮ e perfil ---------- */
@@ -399,31 +409,181 @@ function abrirPessoal(){
     if (q) go("#/g/" + q.id); else toast("Não consegui abrir seu catálogo.");
   }).catch(function(e){ toast(traduzErro(e)); });
 }
+/* ---------- perfil, nível e perfil público ---------- */
+var NIVEIS = ["Curioso", "Passeador", "Explorador", "Rolezeiro", "Gourmet", "Descobridor", "Mestre do rolê", "Lenda local", "Embaixador", "Rei do rolê"];
+function nomeNivel(n){ return NIVEIS[Math.max(1, Math.min(10, n)) - 1]; }
+function htmlAvatar(p, tam){
+  var ini = (((p && p.nome) || "?").trim().charAt(0) || "?").toUpperCase();
+  var estilo = tam ? ' style="width:' + tam + 'px;height:' + tam + 'px;font-size:' + Math.round(tam * 0.45) + 'px"' : "";
+  return '<div class="avatar"' + estilo + '>' + (p && p.avatar_url ? '<img data-path="' + esc(p.avatar_url) + '" data-bucket="avatares" alt="">' : esc(ini)) + '</div>';
+}
+function htmlBarraNivel(p){
+  var h = '<div class="nivel-card"><div class="row"><div class="grow"><div class="title">⭐ Nível ' + p.nivel + ' · ' + esc(nomeNivel(p.nivel)) + '</div>' +
+    '<div class="faint">' + p.pontos + ' pontos</div></div></div>';
+  if (p.proximo){
+    var pct = Math.max(0, Math.min(100, Math.round((p.pontos - p.nivel_min) * 100 / (p.proximo - p.nivel_min))));
+    h += '<div class="barra"><span style="width:' + pct + '%"></span></div><div class="faint">Faltam ' + (p.proximo - p.pontos) + ' pontos para o nível ' + (p.nivel + 1) + ' · ' + esc(nomeNivel(p.nivel + 1)) + '</div>';
+  } else h += '<div class="faint" style="margin-top:6px">Nível máximo alcançado 🎉</div>';
+  return h + '</div>';
+}
+function localPerfil(p){ return [p.bairro, p.cidade].filter(Boolean).join(" · "); }
+
 function viewPerfil(){
   limparMapaGrupo();
-  var nome = S.perfis[S.user.id] ? S.perfis[S.user.id].nome : (S.user.user_metadata && S.user.user_metadata.full_name) || "";
-  var inicial = (nome || S.user.email || "?").trim().charAt(0).toUpperCase();
-  app.innerHTML = '<div class="top"><button class="iconbtn" data-act="irGrupos">‹</button><h1>Meu perfil</h1></div>' +
-    '<div class="center" style="margin:10px 0 18px"><div class="avatar">' + esc(inicial) + '</div></div>' +
-    '<div class="stack">' +
-      '<div><label class="f" for="pNome">Nome</label><input type="text" id="pNome" maxlength="60" autocomplete="name" value="' + esc(nome) + '">' +
-        '<div class="faint" style="margin-top:6px">É o nome que seus amigos e o seu catálogo público mostram.</div></div>' +
-      '<div><label class="f">E-mail</label><div class="muted">' + esc(S.user.email || "") + '</div></div>' +
-      '<div class="err" id="pErr"></div><button class="btn" id="pOk" data-act="salvarPerfil">Salvar</button>' +
-    '</div><div class="center faint" style="margin-top:28px">Rolê · versão ' + APP_VERSION + '</div>';
+  app.innerHTML = '<div class="top"><button class="iconbtn" data-act="irGrupos">‹</button><h1>Meu perfil</h1></div><p class="empty">Carregando…</p>';
+  sb.rpc("perfil_publico", { p_id: S.user.id }).then(function(r){
+    if (r.error || !r.data) throw (r.error || new Error("Perfil não encontrado"));
+    var p = r.data, d = p.detalhe || {};
+    S.perfis[S.user.id] = { id: p.id, nome: p.nome, avatar_url: p.avatar_url, cidade: p.cidade, bairro: p.bairro };
+    S.meuPerfil = p;
+    app.innerHTML = '<div class="top"><button class="iconbtn" data-act="irGrupos">‹</button><h1>Meu perfil</h1></div>' +
+      '<div class="center" style="margin:6px 0 4px">' + htmlAvatar(p, 92) + '</div>' +
+      '<div class="center" style="margin-bottom:14px"><button class="btn sec small" data-act="pFoto">📷 ' + (p.avatar_url ? "Trocar foto" : "Adicionar foto") + '</button>' +
+        '<input type="file" id="pFotoIn" accept="image/*" hidden></div>' +
+      htmlBarraNivel(p) +
+      '<div class="card" style="margin-top:10px"><div class="faint" style="margin-bottom:6px">Seus pontos</div>' +
+        '<div class="row"><span class="grow">🎉 Rolês (' + (d.n_roles || 0) + ')</span><b>' + (d.roles || 0) + '</b></div>' +
+        '<div class="row"><span class="grow">📍 Lugares (' + (d.n_lugares || 0) + ')</span><b>' + (d.lugares || 0) + '</b></div>' +
+        '<div class="row"><span class="grow">👤 Perfil completo</span><b>' + (d.perfil || 0) + '</b></div>' +
+        '<div class="row"><span class="grow">❤️ Apoio da comunidade (' + (d.n_apoio || 0) + ')</span><b>' + (d.apoio || 0) + '</b></div></div>' +
+      '<details class="mais"><summary>Como ganhar pontos</summary><div class="muted" style="margin:8px 0 14px;line-height:1.6">' +
+        '• <b>Rolê registrado:</b> +10 (até 3 por dia)<br>' +
+        '• Rolê com <b>fotos</b> +3, <b>gasto</b> informado +2, <b>comentário</b> +2<br>' +
+        '• <b>Lugar cadastrado:</b> +5 (até 5 por dia)<br>' +
+        '• Lugar com <b>rua, número, bairro, cidade, localização e categoria</b> preenchidos: +10<br>' +
+        '• <b>Perfil completo:</b> foto, cidade e bairro, +5 cada<br>' +
+        '• <b>Apoio:</b> ❤️ +2 e 👍 +1 nos seus catálogos públicos</div></details>' +
+      '<div class="stack" style="margin-top:6px">' +
+        '<div><label class="f" for="pNome">Nome</label><input type="text" id="pNome" maxlength="60" autocomplete="name" value="' + esc(p.nome || "") + '"></div>' +
+        '<div class="row" style="align-items:flex-start"><div class="grow"><label class="f" for="pCidade">Cidade</label><input type="text" id="pCidade" maxlength="80" value="' + esc(p.cidade || "") + '"></div>' +
+          '<div class="grow"><label class="f" for="pBairro">Bairro</label><input type="text" id="pBairro" maxlength="80" value="' + esc(p.bairro || "") + '"></div></div>' +
+        '<button class="btn sec small" style="align-self:flex-start" data-act="pLoc">📍 Usar minha localização</button>' +
+        '<div class="faint">Nome, foto, cidade, bairro e seus catálogos públicos aparecem no seu perfil.</div>' +
+        '<div><label class="f">E-mail</label><div class="muted">' + esc(S.user.email || "") + '</div></div>' +
+        '<div class="err" id="pErr"></div><button class="btn" id="pOk" data-act="salvarPerfil">Salvar</button>' +
+        '<button class="btn sec" data-act="abrirPerfil" data-u="' + esc(S.user.id) + '">Ver meu perfil público</button>' +
+      '</div><div class="center faint" style="margin-top:28px">Rolê · versão ' + APP_VERSION + '</div>';
+    $("pFotoIn").addEventListener("change", function(e){ if (e.target.files && e.target.files[0]) enviarAvatar(e.target.files[0]); e.target.value = ""; });
+    carregarImagens(app);
+  }).catch(function(e){ toast(traduzErro(e)); go("#/grupos"); });
 }
 function salvarPerfil(){
   var nome = ($("pNome").value || "").trim(), err = $("pErr");
+  var cidade = ($("pCidade").value || "").trim(), bairro = ($("pBairro").value || "").trim();
   err.textContent = "";
   if (!nome){ err.textContent = "Digite seu nome."; return; }
   $("pOk").disabled = true;
-  sb.from("perfis").update({ nome: nome }).eq("id", S.user.id).select("id,nome").then(function(r){
+  sb.from("perfis").update({ nome: nome, cidade: cidade || null, bairro: bairro || null }).eq("id", S.user.id).select("id,nome,avatar_url,cidade,bairro").then(function(r){
     $("pOk").disabled = false;
     if (r.error || !r.data || !r.data.length){ err.textContent = r.error ? traduzErro(r.error) : "Não foi possível salvar."; return; }
     S.perfis[S.user.id] = r.data[0];
     toast("Perfil atualizado.");
+    viewPerfil();
   });
 }
+function perfilUsarLocalizacao(){
+  pedirLocalizacao(function(){
+    if (GEO.lat == null){ toast("Não consegui sua localização. Permita o acesso no navegador."); return; }
+    geocodeReverso(GEO.lat, GEO.lng).then(function(o){
+      if (!o || !$("pCidade")){ if (!o) toast("Não consegui descobrir seu bairro agora."); return; }
+      if (o.cidade) $("pCidade").value = o.cidade;
+      if (o.bairro) $("pBairro").value = o.bairro;
+    });
+  });
+}
+function reduzirQuadrado(img, lado, qualidade){
+  var s = Math.min(img.naturalWidth, img.naturalHeight), sx = (img.naturalWidth - s) / 2, sy = (img.naturalHeight - s) / 2, out = Math.min(lado, s);
+  var c = document.createElement("canvas"); c.width = c.height = out;
+  c.getContext("2d").drawImage(img, sx, sy, s, s, 0, 0, out, out);
+  return new Promise(function(res){ c.toBlob(function(b){ res(b); }, "image/jpeg", qualidade); });
+}
+function enviarAvatar(file){
+  var uid = S.user.id, antigo = (S.perfis[uid] || {}).avatar_url;
+  toast("Enviando foto…");
+  lerImagem(file).then(function(img){ return reduzirQuadrado(img, 512, 0.85); }).then(function(blob){
+    if (!blob) throw new Error("Não consegui preparar essa foto.");
+    var caminho = uid + "/" + Date.now() + ".jpg";
+    return sb.storage.from("avatares").upload(caminho, blob, { contentType: "image/jpeg" }).then(function(r){ if (r.error) throw r.error; return caminho; });
+  }).then(function(caminho){
+    return sb.from("perfis").update({ avatar_url: caminho }).eq("id", uid).select("id,nome,avatar_url,cidade,bairro").then(function(r){
+      if (r.error || !r.data || !r.data.length) throw (r.error || new Error("Não foi possível salvar a foto."));
+      S.perfis[uid] = r.data[0];
+      if (antigo) sb.storage.from("avatares").remove([antigo]);
+    });
+  }).then(function(){ toast("Foto atualizada."); viewPerfil(); }).catch(function(e){ toast(traduzErro(e)); });
+}
+
+function viewPerfilPublico(id){
+  limparMapaGrupo();
+  app.innerHTML = '<div class="top"><button class="iconbtn" data-act="voltar">‹</button><h1>Perfil</h1></div><p class="empty">Carregando…</p>';
+  sb.rpc("perfil_publico", { p_id: id }).then(function(r){
+    if (r.error) throw r.error;
+    var p = r.data;
+    if (!p){ toast("Perfil não encontrado."); return go("#/grupos"); }
+    var eu = p.id === S.user.id;
+    var h = '<div class="top"><button class="iconbtn" data-act="voltar">‹</button><h1>' + (eu ? "Meu perfil público" : "Perfil") + '</h1></div>' +
+      '<div class="center" style="margin:6px 0 8px">' + htmlAvatar(p, 92) + '</div>' +
+      '<div class="center"><div class="title" style="font-size:20px">' + esc(p.nome || "Alguém") + '</div>' +
+        (localPerfil(p) ? '<div class="muted">📍 ' + esc(localPerfil(p)) + '</div>' : '') +
+        '<div style="margin-top:8px"><span class="nivel">⭐ Nível ' + p.nivel + ' · ' + esc(nomeNivel(p.nivel)) + ' · ' + p.pontos + ' pts</span></div></div>' +
+      (eu ? '<p class="faint center" style="margin:10px 0 0">É assim que as outras pessoas veem você.</p>' : '') +
+      '<h3 style="margin:20px 0 8px">Catálogos públicos</h3>';
+    if (!(p.catalogos || []).length){
+      h += '<div class="empty" style="padding:18px 0">' + (eu ? "Você ainda não tem catálogos públicos.<br>Em <b>Compartilhar</b> dentro de um catálogo, escolha Público." : "Nenhum catálogo público ainda.") + '</div>';
+    } else {
+      h += p.catalogos.map(function(c){
+        return '<div class="card click" data-act="abrirPublico" data-id="' + esc(c.id) + '"><div class="row"><div class="grow">' +
+          '<div class="title">' + (c.tipo === "pessoal" ? "📒 Catálogo pessoal" : esc(c.nome)) + '</div>' +
+          '<div class="faint">' + c.n_lugares + (c.n_lugares === 1 ? " lugar" : " lugares") + ' · ❤️ ' + c.coracoes + ' · 👍 ' + c.likes + '</div></div><span>›</span></div></div>';
+      }).join("");
+    }
+    app.innerHTML = h;
+    carregarImagens(app);
+  }).catch(function(e){ toast(traduzErro(e)); go("#/grupos"); });
+}
+
+/* apoio da comunidade no catálogo público: ❤️ e 👍 */
+function renderApoio(){
+  var box = $("apoioBox"), i = S.infoPublico; if (!box || !i) return;
+  var dono = { nome: i.dono_nome, avatar_url: i.dono_avatar };
+  box.innerHTML = '<div class="card"><div class="row click" data-act="abrirPerfil" data-u="' + esc(i.dono_id) + '">' + htmlAvatar(dono, 38) +
+    '<div class="grow"><div class="faint">Catálogo de</div><div class="title">' + esc(i.dono_nome || "Alguém") + '</div></div>' +
+    '<span class="nivel">⭐ Nível ' + i.dono_nivel + '</span></div>' +
+    '<div class="chips" style="margin-top:12px">' +
+      '<button class="chip react ' + (i.eu_coracao ? "on" : "") + '" data-act="reagir" data-t="coracao">❤️ ' + i.coracoes + '</button>' +
+      '<button class="chip react ' + (i.eu_like ? "on" : "") + '" data-act="reagir" data-t="like">👍 ' + i.likes + '</button></div>' +
+    '<div class="faint" style="margin-top:6px">Apoie este catálogo com um coração ou um like.</div></div>';
+  carregarImagens(box);
+}
+function reagir(tipo){
+  var i = S.infoPublico; if (!i) return;
+  sb.rpc("alternar_curtida", { p_grupo: i.id, p_tipo: tipo }).then(function(r){
+    if (r.error){ toast(traduzErro(r.error)); return; }
+    i.coracoes = r.data.coracoes; i.likes = r.data.likes;
+    if (tipo === "coracao") i.eu_coracao = r.data.ativo; else i.eu_like = r.data.ativo;
+    renderApoio();
+  });
+}
+function apoioDono(g){
+  if (!g.publico) return;
+  sb.rpc("catalogo_publico_info", { p_id: g.id }).then(function(r){
+    var el = $("apoioDono"); if (!el || r.error || !r.data) return;
+    el.textContent = "❤️ " + r.data.coracoes + " · 👍 " + r.data.likes + " apoiando este catálogo";
+  });
+}
+function atualizarSaudacao(){
+  sb.rpc("perfil_publico", { p_id: S.user.id }).then(function(r){
+    if (r.error || !r.data) return;
+    S.meuPerfil = r.data;
+    var el = $("saudacao"); if (el) el.innerHTML = saudacaoHtml();
+  });
+}
+function saudacaoHtml(){
+  var nome = S.perfis[S.user.id] ? S.perfis[S.user.id].nome : (S.user.user_metadata && S.user.user_metadata.full_name) || "";
+  var p = S.meuPerfil;
+  return (nome ? "Olá, " + esc(nome) + "!" : "Olá!") + (p ? ' · <span class="nivel">⭐ Nível ' + p.nivel + ' · ' + esc(nomeNivel(p.nivel)) + '</span>' : "");
+}
+
 function abrirSheet(html){
   fecharSheet();
   var bg = document.createElement("div"); bg.className = "sheet-bg"; bg.id = "sheet";
@@ -492,7 +652,7 @@ function renderAmigos(){
   S.linkAmigo = link;
   var rec = pedidosRecebidos(), env = S.amigos.filter(function(a){ return a.direcao === "enviada"; }), ok = S.amigos.filter(function(a){ return a.direcao === "amigo"; });
   var linha = function(a, botoes){
-    return '<div class="card"><div class="row"><div class="grow"><div class="title">' + esc(a.nome || "Alguém") + '</div></div>' + botoes + '</div></div>';
+    return '<div class="card"><div class="row"><div class="grow click" data-act="abrirPerfil" data-u="' + esc(a.user_id) + '"><div class="title">' + esc(a.nome || "Alguém") + ' ›</div></div>' + botoes + '</div></div>';
   };
   var h = '<div class="top"><button class="iconbtn" data-act="irGrupos">‹</button><h1>Amigos</h1></div>' +
     '<div class="card"><div class="faint">Seu código de amigo</div><div class="code" style="margin:6px 0">' + esc(S.codigoAmigo) + '</div>' +
@@ -579,6 +739,7 @@ function viewLista(){
   var h = '<div class="top"><button class="iconbtn" data-act="irGrupos" aria-label="Grupos">‹</button><h1>' + esc(g.nome) + '</h1>' +
     '<button class="iconbtn" data-act="vista">' + (S.vista === "mapa" ? "☰ Lista" : "🗺️ Mapa") + '</button>' +
     (S.somenteLeitura ? '<span class="tag">Público</span>' : '<button class="iconbtn" data-act="convidar">' + (S.grupo.tipo === "pessoal" ? "Compartilhar" : "Convidar") + '</button>') + '</div>' +
+    (S.somenteLeitura ? '<div id="apoioBox"></div>' : '') +
     '<div class="tabs" style="margin-bottom:12px">' +
       '<button data-act="aba" data-v="ja_fomos" class="' + (S.aba === "ja_fomos" ? "on" : "") + '">Já fomos</button>' +
       '<button data-act="aba" data-v="quero_ir" class="' + (S.aba === "quero_ir" ? "on" : "") + '">Quero ir</button></div>' +
@@ -589,6 +750,7 @@ function viewLista(){
     (S.somenteLeitura ? '' : '<button class="fab" data-act="novoLugar">Novo rolê</button>');
   app.innerHTML = h;
   $("busca").addEventListener("input", function(e){ S.busca = e.target.value; renderCards(); });
+  if (S.somenteLeitura) renderApoio();
   renderCards();
 }
 function renderCards(){
@@ -730,10 +892,11 @@ function viewPublico(id){
   var meu = S.grupos.filter(function(g){ return g.id === id; })[0];
   if (meu) return go("#/g/" + id);
   app.innerHTML = '<p class="empty">Carregando…</p>';
-  Promise.all([ sb.rpc("grupo_publico_info", { p_id: id }), sb.rpc("catalogo_publico", { p_grupo: id }) ]).then(function(rs){
+  Promise.all([ sb.rpc("catalogo_publico_info", { p_id: id }), sb.rpc("catalogo_publico", { p_grupo: id }) ]).then(function(rs){
     if (rs[0].error) throw rs[0].error;
     if (rs[1].error) throw rs[1].error;
-    var info = (rs[0].data || [])[0];
+    var info = rs[0].data;
+    S.infoPublico = info;
     if (!info){ toast("Este catálogo é privado ou não existe."); return go("#/grupos"); }
     S.somenteLeitura = true;
     S.grupo = { id: info.id, nome: info.nome, tipo: info.tipo };
@@ -779,6 +942,7 @@ function secaoCatalogo(g, semTitulo){
     h += '<div class="faint">Hoje o catálogo é ' + (g.publico ? "público" : "privado") + '. Só quem criou o grupo pode mudar.</div>';
   }
   if (g.publico){
+    h += '<div class="faint" id="apoioDono" style="margin-bottom:10px"></div>';
     var link = location.origin + location.pathname + "?publico=" + encodeURIComponent(g.id);
     S.linkPublico = link;
     h += '<div class="stack" style="margin-top:12px"><button class="btn sec" data-act="copiarPublico">Copiar link público</button>' +
@@ -791,6 +955,7 @@ function convidar(){
   var g = S.grupo;
   if (g.tipo === "pessoal"){
     abrirSheet('<h2 style="margin-bottom:8px">Compartilhar meu catálogo</h2>' + secaoCatalogo(g, true));
+    apoioDono(g);
     return;
   }
   var link = location.origin + location.pathname + "?codigo=" + encodeURIComponent(g.codigo);
@@ -799,6 +964,7 @@ function convidar(){
     '<p class="muted center" style="margin-top:0">Quem entrar com esse código vê todos os lugares do grupo.</p>' +
     '<div class="stack"><a class="btn" style="text-decoration:none;text-align:center" target="_blank" rel="noopener" href="https://wa.me/?text=' + encodeURIComponent(S.convite.texto) + '">Enviar pelo WhatsApp</a>' +
     '<button class="btn sec" data-act="copiarConvite">Copiar convite</button></div>' + secaoCatalogo(g) + secaoAmigosGrupo(g));
+  apoioDono(g);
 }
 
 /* ---------- detalhe do lugar ---------- */
@@ -1209,15 +1375,16 @@ function mesclarPara(destinoLocalId){
 var FOTOS_MAX = 10, urlCache = {};
 function pathThumb(c){ return c.replace(/\.jpg$/, "_t.jpg"); }
 function ordenarFotos(v){ return (v.fotos || []).slice().sort(function(a, b){ return a.created_at < b.created_at ? -1 : 1; }); }
-function urlsAssinadas(caminhos){
-  var agora = Date.now();
-  var faltam = caminhos.filter(function(c, i){ return caminhos.indexOf(c) === i && (!urlCache[c] || urlCache[c].exp < agora); });
-  var p = faltam.length ? sb.storage.from("fotos").createSignedUrls(faltam, 3600).then(function(r){
+function urlsAssinadas(caminhos, bucket){
+  bucket = bucket || "fotos";
+  var agora = Date.now(), chave = function(c){ return bucket + "|" + c; };
+  var faltam = caminhos.filter(function(c, i){ return caminhos.indexOf(c) === i && (!urlCache[chave(c)] || urlCache[chave(c)].exp < agora); });
+  var p = faltam.length ? sb.storage.from(bucket).createSignedUrls(faltam, 3600).then(function(r){
     if (r.error) throw r.error;
-    (r.data || []).forEach(function(x){ if (x.signedUrl) urlCache[x.path] = { url: x.signedUrl, exp: agora + 50 * 60 * 1000 }; });
+    (r.data || []).forEach(function(x){ if (x.signedUrl) urlCache[chave(x.path)] = { url: x.signedUrl, exp: agora + 50 * 60 * 1000 }; });
   }) : Promise.resolve();
   return p.then(function(){
-    var o = {}; caminhos.forEach(function(c){ if (urlCache[c]) o[c] = urlCache[c].url; });
+    var o = {}; caminhos.forEach(function(c){ if (urlCache[chave(c)]) o[c] = urlCache[chave(c)].url; });
     return o;
   });
 }
@@ -1225,9 +1392,13 @@ function carregarImagens(raiz){
   if (!raiz) return;
   var imgs = Array.prototype.slice.call(raiz.querySelectorAll("img[data-path]"));
   if (!imgs.length) return;
-  urlsAssinadas(imgs.map(function(i){ return i.getAttribute("data-path"); })).then(function(m){
-    imgs.forEach(function(i){ var u = m[i.getAttribute("data-path")]; if (u) i.src = u; });
-  }).catch(function(){});
+  var porBucket = {};
+  imgs.forEach(function(i){ var b = i.getAttribute("data-bucket") || "fotos"; (porBucket[b] = porBucket[b] || []).push(i); });
+  Object.keys(porBucket).forEach(function(b){
+    urlsAssinadas(porBucket[b].map(function(i){ return i.getAttribute("data-path"); }), b).then(function(m){
+      porBucket[b].forEach(function(i){ var u = m[i.getAttribute("data-path")]; if (u) i.src = u; });
+    }).catch(function(){});
+  });
 }
 function lerImagem(file){
   return new Promise(function(res, rej){
@@ -1507,6 +1678,11 @@ document.addEventListener("click", function(e){
     case "irPerfil": return go("#/perfil");
     case "abrirPessoal": return abrirPessoal();
     case "salvarPerfil": return salvarPerfil();
+    case "pFoto": return $("pFotoIn").click();
+    case "pLoc": return perfilUsarLocalizacao();
+    case "abrirPerfil": return go("#/u/" + d.u);
+    case "abrirPublico": return go("#/publico/" + d.id);
+    case "reagir": return reagir(d.t);
     case "copiarLinkAmigo":
       if (navigator.clipboard) navigator.clipboard.writeText(S.linkAmigo).then(function(){ toast("Link copiado"); });
       return;
@@ -1610,7 +1786,7 @@ function iniciar(user){
     p = p.then(function(){ return entrarGrupo(conv, true); }).then(function(){ return carregarGrupos(); });
   }
   p.then(function(){
-    return sb.from("perfis").select("id,nome").eq("id", user.id).then(function(r){
+    return sb.from("perfis").select("id,nome,avatar_url,cidade,bairro").eq("id", user.id).then(function(r){
       if (r.data) r.data.forEach(function(x){ S.perfis[x.id] = x; });
     });
   }).then(function(){
@@ -1627,12 +1803,8 @@ function iniciar(user){
     }
     var pub = lsGet("role_publico");
     if (pub){ lsSet("role_publico", null); location.hash = "#/publico/" + pub; return; }
-    if (!location.hash || location.hash === "#/" || location.hash === "#"){
-      var ultimo = lsGet("role_grupo");
-      if (ultimo && S.grupos.some(function(g){ return g.id === ultimo; })) location.hash = "#/g/" + ultimo;
-      else if (S.grupos.length === 1) location.hash = "#/g/" + S.grupos[0].id;
-      else route();
-    } else route();
+    S._grupoAuto = true;   // a página inicial é sempre "Seus grupos"
+    route();
   }).catch(function(e){ app.innerHTML = '<p class="empty">Erro ao carregar: ' + esc(traduzErro(e)) + '</p>'; });
 }
 sb.auth.onAuthStateChange(function(evento, session){
