@@ -166,6 +166,8 @@
   .scan-quadro{position:relative;width:min(68vw,280px);aspect-ratio:1;border:3px solid #fff;border-radius:22px;box-shadow:0 0 0 100vmax rgba(0,0,0,.5)}
   .lb img.lb-avatar{width:min(92vw,520px);height:auto;max-height:80vh;border-radius:22px;object-fit:cover}
   .avatar.click{cursor:pointer}
+  .linkbtn{border:0;background:none;color:var(--accent);font-weight:600;padding:0;font-size:inherit;text-decoration:underline}
+  .chip.fixo{opacity:.92}
   .rev{border-top:1px solid var(--line);padding-top:10px;margin-top:10px}
   .rev:first-child{border-top:0;padding-top:0;margin-top:0}
 </style>
@@ -240,6 +242,8 @@ function traduzErro(e){
   if (/Email not confirmed/i.test(m)) return "Confirme seu e-mail antes de entrar.";
   if (/outro grupo usa/i.test(m)) return "Outro grupo usa este lugar, então não dá para mesclar por aqui.";
   if (/sem permissao/i.test(m)) return "Você não tem permissão para mesclar este lugar.";
+  if (/role em grupo precisa/i.test(m)) return "Um rolê em grupo precisa de pelo menos 2 pessoas. Se foi só você, registre no seu catálogo pessoal.";
+  if (/criador deve participar/i.test(m)) return "Quem criou o rolê precisa continuar entre os participantes.";
   if (/selecione ao menos um participante/i.test(m)) return "Selecione pelo menos um integrante que foi ao rolê.";
   if (/participante nao integrante/i.test(m)) return "Só integrantes do grupo podem participar do rolê.";
   if (/proprio catalogo/i.test(m)) return "Você não pode apoiar o seu próprio catálogo.";
@@ -1626,17 +1630,20 @@ function viewFormVisita(lugarId, visitaId){
   S.form = {
     lugarId: lugarId, visitaId: visitaId,
     cb: minha ? minha.custo_beneficio : null, voltaria: minha ? minha.voltaria : null,
+    criadorId: v && v.criado_por ? v.criado_por : S.user.id,
     participantes: v ? (v.visita_participantes || []).map(function(x){ return x.user_id; }) : [S.user.id],
     pessoasManual: !!v,
     delivery: v ? !!v.delivery : false,
     fotosExist: v ? ordenarFotos(v) : [], fotosNovas: [], fotosRemover: []
   };
+  if (S.form.participantes.indexOf(S.form.criadorId) < 0) S.form.participantes.push(S.form.criadorId);
   var nota = minha ? Number(minha.nota) : 8;
   var h = '<div class="top"><button class="iconbtn" data-act="voltar">‹</button><h1>' + (v ? "Editar rolê" : "Novo rolê") + '</h1></div><div class="stack">' +
     '<div class="card" style="margin:0"><div class="title">' + esc(l.nome) + '</div><div class="muted">' + resumoLocal(l) + '</div>' +
       (fmtEnd(l) ? '<div class="faint">' + esc(fmtEnd(l)) + '</div>' : '') + '</div>' +
     (S.grupo.tipo === "pessoal" ? '' : '<div><label class="f">Quem foi ao rolê?</label><div class="chips" id="gPart"></div>' +
-      '<div class="faint" style="margin-top:6px">Selecione pelo menos uma pessoa do grupo.</div></div>') +
+      '<div class="faint" style="margin-top:6px">Quem cria o rolê já está incluído. Escolha pelo menos mais uma pessoa do grupo.</div>' +
+      '<div class="faint">Foi só você? <button type="button" class="linkbtn" data-act="novoNoPessoal">Registre no seu catálogo pessoal</button>.</div></div>') +
     '<div class="row"><div class="grow"><label class="f" for="vData">Data do rolê</label><input type="date" id="vData" max="' + hoje() + '" value="' + esc(v ? v.data : hoje()) + '"></div>' +
       '<div class="grow"><label class="f" for="vPessoas">Pessoas</label><input type="number" id="vPessoas" min="1" max="99" inputmode="numeric" value="' + (v && v.num_pessoas ? v.num_pessoas : S.form.participantes.length) + '"></div></div>' +
     '<div><label class="f">Como foi?</label><div class="chips" id="gDelivery">' +
@@ -1676,10 +1683,10 @@ function renderParticipantes(){
     return nomeDe(a.user_id).localeCompare(nomeDe(b.user_id));
   });
   box.innerHTML = lista.map(function(m){
-    var on = f.participantes.indexOf(m.user_id) >= 0;
-    return '<button type="button" class="chip ' + (on ? "on" : "") + '" data-act="fPart" data-u="' + esc(m.user_id) + '">' +
-      esc(nomeDe(m.user_id)) + (m.user_id === S.user.id ? " (você)" : "") + '</button>';
-  }).join("");
+    var on = f.participantes.indexOf(m.user_id) >= 0, fixo = m.user_id === f.criadorId;
+    return '<button type="button" class="chip ' + (on ? "on" : "") + (fixo ? " fixo" : "") + '" data-act="fPart" data-u="' + esc(m.user_id) + '">' +
+      esc(nomeDe(m.user_id)) + (m.user_id === S.user.id ? " (você)" : "") + (fixo ? " 🔒" : "") + '</button>';
+  }).join("") + (lista.length < 2 ? '<div class="err" style="width:100%">Este grupo só tem você. Convide alguém ou registre no seu catálogo pessoal.</div>' : "");
 }
 function salvarVisita(){
   var f = S.form, l = lugarPorId(f.lugarId);
@@ -1696,7 +1703,11 @@ function salvarVisita(){
     pedidos: $("vPedidos").value.trim() || null, comentario: $("vCom").value.trim() || null
   };
   var parts = S.grupo.tipo === "pessoal" ? [S.user.id] : f.participantes.slice();
-  if (!parts.length){ $("fErr").textContent = "Selecione pelo menos um integrante que foi ao rolê."; return; }
+  if (S.grupo.tipo !== "pessoal" && parts.indexOf(f.criadorId) < 0) parts.push(f.criadorId);
+  if (parts.length < (S.grupo.tipo === "pessoal" ? 1 : 2)){
+    $("fErr").textContent = "Um rolê em grupo precisa de pelo menos 2 pessoas (você e mais alguém). Se foi só você, registre no seu catálogo pessoal.";
+    return;
+  }
   var btn = $("fOk"); btn.disabled = true; btn.textContent = "Salvando…"; $("fErr").textContent = "";
   var novo = !f.visitaId, falhas = 0;
   var pVisita = f.visitaId
@@ -1796,7 +1807,12 @@ document.addEventListener("click", function(e){
       if (i >= 0) S.form.atributos.splice(i, 1); else S.form.atributos.push(d.v);
       return marcar(el.parentNode, el, true);
     case "usarLoc": return usarLocalizacao();
+    case "novoNoPessoal":
+      var pes = S.grupos.filter(function(x){ return x.tipo === "pessoal"; })[0];
+      if (pes) return go("#/g/" + pes.id + "/novo");
+      return abrirPessoal();
     case "fPart":
+      if (d.u === S.form.criadorId){ toast("Quem cria o rolê sempre participa."); return; }
       var ip = S.form.participantes.indexOf(d.u);
       if (ip >= 0) S.form.participantes.splice(ip, 1); else S.form.participantes.push(d.u);
       renderParticipantes();
