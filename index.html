@@ -242,7 +242,7 @@ function carregarGrupo(id){
     S.lugares = (rs[0].data || []).map(function(l){
       var lo = l.locais || {};
       l.nome = lo.nome; l.categoria = lo.categoria; l.bairro = lo.bairro; l.cidade = lo.cidade;
-      l.lat = lo.lat; l.lng = lo.lng; l.precisao = lo.precisao; l.local_criado_por = lo.criado_por; l.privado = !!lo.privado; l.endereco = lo.endereco;
+      l.lat = lo.lat; l.lng = lo.lng; l.precisao = lo.precisao; l.local_criado_por = lo.criado_por; l.privado = !!lo.privado; l.endereco = lo.endereco; l.numero = lo.numero;
       return l;
     });
     S.membros = rs[1].data || [];
@@ -525,7 +525,7 @@ function viewLugar(id){
   var sub = [c[1] + " " + c[2], l.bairro, l.cidade].filter(Boolean).map(esc).join(" · ");
   var h = '<div class="top"><button class="iconbtn" data-act="voltarLista">‹</button><h1>' + esc(l.nome) + '</h1>' +
     '<button class="iconbtn" data-act="editarLugar" data-id="' + esc(l.id) + '">Editar</button></div>' +
-    '<p class="muted" style="margin-top:0">' + sub + (l.endereco ? '<br>' + esc(l.endereco) : '') + '</p>';
+    '<p class="muted" style="margin-top:0">' + sub + (fmtEnd(l) ? '<br>' + esc(fmtEnd(l)) : '') + '</p>';
   if ((l.atributos||[]).length){
     h += '<div>' + l.atributos.map(function(a){ return '<span class="tag">' + esc(ATR[a] || a) + '</span>'; }).join("") + '</div>';
   }
@@ -621,16 +621,40 @@ function distM(lat1, lng1, lat2, lng2){
   return 2 * R * Math.asin(Math.sqrt(x));
 }
 
+function queryEnd(rua, numero){
+  rua = (rua || "").trim(); numero = (numero || "").trim();
+  return rua ? rua + (numero ? ", " + numero : "") : "";
+}
+function fmtEnd(x){ return queryEnd(x.endereco, x.numero); }
+var geoTimer = null;
+function agendarGeocode(){ clearTimeout(geoTimer); geoTimer = setTimeout(geocodificarForm, 900); }
+function geocodificarForm(){
+  var f = S.form;
+  if (!f || (f.modo !== "novo" && f.modo !== "editar" && f.modo !== "admin")) return Promise.resolve();
+  var cidade = (($("fCidade") ? $("fCidade").value : f.cidade) || "").trim();
+  var q = queryEnd(f.endereco, f.numero);
+  if (!q || !cidade || q === f.geoQuery) return Promise.resolve();
+  f.geoQuery = q;
+  var hint = $("mapHint"); if (hint) hint.textContent = "Procurando no mapa…";
+  return geocodeEndereco(q, cidade).then(function(g){
+    if (S.form !== f) return;
+    if (!g){ if (hint) hint.textContent = "Não achei esse endereço no mapa. Arraste o pin até o lugar certo."; return; }
+    if (hint) hint.textContent = "Confira o pin e arraste se precisar ajustar.";
+    if (f.precisao === "gps" && f.lat != null && distM(f.lat, f.lng, g.lat, g.lng) <= 300) return;
+    if (S.map) colocarPin(g.lat, g.lng, "endereco"); else { f.lat = g.lat; f.lng = g.lng; f.precisao = "endereco"; }
+  });
+}
+
 function viewFormLugar(id){
   var l = id ? lugarPorId(id) : null;
   if (id && !l) return go("#/g/" + S.grupo.id);
   if (l){
     S.form = { modo: "editar", id: id, localId: l.local_id, nome: l.nome, categoria: l.categoria, bairro: l.bairro || "",
-      cidade: l.cidade || "", endereco: l.endereco || "", enderecoOrig: l.endereco || "", lat: l.lat, lng: l.lng, precisao: l.precisao,
+      cidade: l.cidade || "", endereco: l.endereco || "", numero: l.numero || "", geoQuery: queryEnd(l.endereco, l.numero), lat: l.lat, lng: l.lng, precisao: l.precisao,
       estado: l.estado, atributos: (l.atributos || []).slice(), maps: l.maps_url || "", privado: !!l.privado,
       editavelLocal: l.local_criado_por === S.user.id || S.admin };
   } else {
-    S.form = { modo: "busca", nome: "", categoria: "restaurante", bairro: "", cidade: "", endereco: "",
+    S.form = { modo: "busca", nome: "", categoria: "restaurante", bairro: "", cidade: "", endereco: "", numero: "", geoQuery: "",
       lat: null, lng: null, precisao: "desconhecida", estado: "ja_fomos", atributos: [], maps: "", privado: false, sugs: [] };
   }
   renderForm();
@@ -652,17 +676,20 @@ function htmlCamposLocal(f){
   return '<div><label class="f" for="fNome">Nome</label><input type="text" id="fNome" maxlength="120" autocomplete="off" value="' + esc(f.nome) + '"></div>' +
     '<div><label class="f">Categoria</label><div class="chips">' +
       CATEGORIAS.map(function(c){ return '<button class="chip ' + (c[0] === f.categoria ? "on" : "") + '" data-act="fSingle" data-g="categoria" data-v="' + c[0] + '">' + c[1] + " " + esc(c[2]) + '</button>'; }).join("") + '</div></div>' +
-    '<div><label class="f" for="fEndereco">Endereço</label><input type="text" id="fEndereco" maxlength="200" autocomplete="off" placeholder="Rua e número" value="' + esc(f.endereco) + '">' +
-      '<div id="endExtras" style="margin-top:8px"></div></div>';
+    '<div class="row" style="align-items:flex-start"><div class="grow"><label class="f" for="fEndereco">Rua</label>' +
+      '<input type="text" id="fEndereco" maxlength="200" autocomplete="off" placeholder="Nome da rua" value="' + esc(f.endereco) + '"></div>' +
+      '<div style="width:96px"><label class="f" for="fNumero">Número</label>' +
+      '<input type="text" id="fNumero" maxlength="20" autocomplete="off" inputmode="numeric" placeholder="Nº" value="' + esc(f.numero) + '"></div></div>' +
+    '<div id="endExtras"></div>' +
+    '<div><label class="f">Localização</label><div id="mapa" class="map"></div>' +
+      '<div class="row" style="margin-top:8px"><span class="faint grow" id="mapStatus"></span><button class="btn sec small" data-act="usarLoc">📍 Minha localização</button></div>' +
+      '<div class="faint" id="mapHint">Ao digitar a rua e o número, o local aparece no mapa. Você pode arrastar o pin para ajustar.</div></div>';
 }
 function htmlMaisOpcoes(f, comLocal, semMaps){
   var h = '<details id="maisOp" class="mais"><summary>Mais opções</summary><div class="stack" style="margin-top:12px">' +
     (semMaps ? '' : '<div><label class="f" for="fMaps">Link do Google Maps (opcional)</label><input type="url" id="fMaps" placeholder="https://maps.app.goo.gl/…" value="' + esc(f.maps) + '"></div>');
   if (comLocal){
-    h += '<div><label class="f">Ajustar no mapa</label><div id="mapa" class="map"></div>' +
-      '<div class="row" style="margin-top:8px"><span class="faint grow" id="mapStatus"></span><button class="btn sec small" data-act="usarLoc">📍 Minha localização</button></div>' +
-      '<div class="faint">Toque no mapa ou arraste o pin até o lugar certo.</div></div>' +
-      '<div><label class="f">Visibilidade</label><div class="chips"><button class="chip ' + (f.privado ? "on" : "") + '" data-act="fPrivado">🔒 Lugar privado (só quem usa no grupo vê)</button></div>' +
+    h += '<div><label class="f">Visibilidade</label><div class="chips"><button class="chip ' + (f.privado ? "on" : "") + '" data-act="fPrivado">🔒 Lugar privado (só quem usa no grupo vê)</button></div>' +
       '<div class="faint" style="margin-top:6px">Use para casas, locais pessoais ou o que não deve aparecer no catálogo de todos.</div></div>';
   }
   return h + '</div></details>';
@@ -678,11 +705,11 @@ function renderEnderecoExtras(){
   }
   var campo = $("fEndereco");
   if (f.endAtual && !(campo && campo.value.trim())){
-    h += '<button class="chip" style="margin-top:8px" data-act="usarEndereco">📍 Usar meu endereço atual: ' + esc(f.endAtual) + '</button>';
+    h += '<button class="chip" style="margin-top:8px" data-act="usarEndereco">📍 Usar meu endereço atual: ' + esc(queryEnd(f.endAtual, f.numAtual)) + '</button>';
   }
   el.innerHTML = h;
   var ci = $("fCidade");
-  if (ci) ci.addEventListener("input", function(){ f.cidade = ci.value; f.cidadeManual = true; });
+  if (ci) ci.addEventListener("input", function(){ f.cidade = ci.value; f.cidadeManual = true; agendarGeocode(); });
 }
 function renderForm(){
   var f = S.form;
@@ -699,7 +726,7 @@ function renderForm(){
   } else {
     if (comLocal) h += htmlCamposLocal(f);
     else h += '<div class="card"><div class="title">' + esc(f.modo === "existente" ? f.local.nome : f.nome) + '</div><div class="muted">' + resumoLocal(f.modo === "existente" ? f.local : f) + '</div>' +
-      ((f.modo === "existente" ? f.local.endereco : f.endereco) ? '<div class="faint">' + esc(f.modo === "existente" ? f.local.endereco : f.endereco) + '</div>' : '') +
+      (fmtEnd(f.modo === "existente" ? f.local : f) ? '<div class="faint">' + esc(fmtEnd(f.modo === "existente" ? f.local : f)) + '</div>' : '') +
       (f.modo === "editar" ? '<div class="faint" style="margin-top:6px">Nome e endereço só podem ser mudados por quem cadastrou o lugar, e só enquanto nenhum outro grupo o usa.</div>' : '') + '</div>';
     h += (f.modo === "admin" ? "" : htmlCamposGrupo(f)) + htmlMaisOpcoes(f, comLocal, f.modo === "admin") + '<div class="err" id="fErr"></div><button class="btn" id="fOk" data-act="salvarLugar">Salvar</button>';
   }
@@ -719,17 +746,17 @@ function renderForm(){
   }
   if (comLocal){
     renderEnderecoExtras();
-    var campo = $("fEndereco");
+    var campo = $("fEndereco"), num = $("fNumero");
     campo.addEventListener("input", function(){
       var tinha = !!f.endereco.trim(); f.endereco = campo.value;
       if (tinha !== !!f.endereco.trim()) renderEnderecoExtras();
+      agendarGeocode();
     });
+    num.addEventListener("input", function(){ f.numero = num.value; agendarGeocode(); });
+    if ($("mapa")) montarMapa();
+    // endereço já salvo mas sem coordenadas: procura no mapa ao abrir
+    if (f.lat == null && f.endereco && f.cidade){ f.geoQuery = ""; geocodificarForm(); }
   }
-  var det = $("maisOp");
-  if (det && $("mapa")) det.addEventListener("toggle", function(){
-    if (!det.open) return;
-    if (!S.map) montarMapa(); else S.map.invalidateSize();
-  });
 }
 
 /* busca no catálogo: perto de mim + nome parecido */
@@ -757,7 +784,7 @@ function renderSugs(){
       x.n_grupos ? x.n_grupos + (x.n_grupos === 1 ? " grupo usa" : " grupos usam") : null].filter(Boolean).join(" · ");
     h += '<div class="card click" data-act="pickLocal" data-id="' + esc(x.id) + '"><div class="row"><div class="grow">' +
       '<div class="title">' + esc(x.nome) + '</div><div class="muted">' + resumoLocal(x) + '</div>' +
-      (x.endereco ? '<div class="faint">' + esc(x.endereco) + '</div>' : '') +
+      (fmtEnd(x) ? '<div class="faint">' + esc(fmtEnd(x)) + '</div>' : '') +
       (meta ? '<div class="faint">' + esc(meta) + '</div>' : '') + '</div>' +
       (noGrupo ? '<span class="tag plain">No seu grupo</span>' : '<span class="tag">É este</span>') + '</div></div>';
   });
@@ -780,7 +807,7 @@ function novoLocal(){
     if (!o || S.form !== f || f.modo !== "novo") return;
     if (!f.cidadeManual && o.cidade) f.cidade = o.cidade;
     if (!f.bairro && o.bairro) f.bairro = o.bairro;
-    f.endAtual = o.rua ? o.rua + (o.numero ? ", " + o.numero : "") : "";
+    f.endAtual = o.rua || ""; f.numAtual = o.numero || "";
     renderEnderecoExtras();
   });
 }
@@ -829,11 +856,13 @@ function salvarLugar(){
   if (maps && !/^https?:\/\//i.test(maps)){ err.textContent = "O link precisa começar com http:// ou https://"; return; }
   var grupoPay = { estado: f.estado, atributos: f.atributos, maps_url: maps || null };
   var editaLocal = f.modo === "novo" || f.modo === "admin" || (f.modo === "editar" && f.editavelLocal);
-  var nome = "", endereco = "", cidade = "";
+  var nome = "", endereco = "", numero = "", cidade = "";
   if (editaLocal){
     nome = $("fNome").value.trim();
     if (!nome){ err.textContent = "O nome é obrigatório."; return; }
     endereco = $("fEndereco").value.trim();
+    numero = $("fNumero").value.trim();
+    f.endereco = endereco; f.numero = numero;
     cidade = ($("fCidade") ? $("fCidade").value : f.cidade).trim();
     if (cidade) lsSet("role_cidade", cidade);
   }
@@ -841,14 +870,9 @@ function salvarLugar(){
   var novo = f.modo !== "editar", compartilhado = false;
 
   // o endereço digitado refina a posição quando o GPS não bate (ex.: cadastrou de casa) ou não existe
-  var refinar = Promise.resolve();
-  if (editaLocal && endereco && cidade && f.precisao !== "ajustada" && (f.modo === "novo" || endereco !== f.enderecoOrig)){
-    refinar = geocodeEndereco(endereco, cidade).then(function(g){
-      if (g && (f.lat == null || distM(f.lat, f.lng, g.lat, g.lng) > 300)){ f.lat = g.lat; f.lng = g.lng; f.precisao = "endereco"; }
-    });
-  }
+  var refinar = editaLocal ? geocodificarForm() : Promise.resolve();
   refinar.then(function(){
-    var local = editaLocal ? { nome: nome, categoria: f.categoria, bairro: f.bairro || null, cidade: cidade || null, endereco: endereco || null,
+    var local = editaLocal ? { nome: nome, categoria: f.categoria, bairro: f.bairro || null, cidade: cidade || null, endereco: endereco || null, numero: numero || null,
       lat: f.lat, lng: f.lng, precisao: f.lat == null ? "desconhecida" : f.precisao, privado: !!f.privado } : null;
     if (f.modo === "novo"){
       return sb.from("locais").insert(local).select().single().then(function(r){
@@ -913,7 +937,7 @@ function viewAdmin(){
 function carregarAdmin(){
   var el = $("admLista"); if (!el) return;
   var q = (S.admBusca || "").trim().replace(/[%_,()*]/g, ""), seq = ++admSeq;
-  var qb = sb.from("locais").select("id,nome,categoria,bairro,cidade,endereco,lat,lng,privado")
+  var qb = sb.from("locais").select("id,nome,categoria,bairro,cidade,endereco,numero,lat,lng,privado")
     .eq("status", "ativo").order("created_at", { ascending: false }).limit(60);
   if (q) qb = qb.ilike("nome", "%" + q + "%");
   if (S.admFiltro === "sem_end") qb = qb.is("endereco", null);
@@ -930,7 +954,7 @@ function carregarAdmin(){
       if (x.privado) faltas.push("privado");
       return '<div class="card click" data-act="abrirAdminLocal" data-id="' + esc(x.id) + '"><div class="title">' + esc(x.nome) + '</div>' +
         '<div class="muted">' + resumoLocal(x) + '</div>' +
-        (x.endereco ? '<div class="faint">' + esc(x.endereco) + '</div>' : '') +
+        (fmtEnd(x) ? '<div class="faint">' + esc(fmtEnd(x)) + '</div>' : '') +
         (faltas.length ? '<div class="faint" style="color:var(--mid)">' + esc(faltas.join(" · ")) + '</div>' : '') + '</div>';
     }).join("") + (lista.length === 60 ? '<div class="faint center">Mostrando os 60 mais recentes. Use a busca para filtrar.</div>' : "");
   });
@@ -942,7 +966,7 @@ function viewAdminLocal(id){
     if (r.error || !r.data){ toast("Lugar não encontrado."); return go("#/admin"); }
     var l = r.data;
     S.form = { modo: "admin", localId: id, nome: l.nome, categoria: l.categoria, bairro: l.bairro || "", cidade: l.cidade || "",
-      endereco: l.endereco || "", enderecoOrig: l.endereco || "", lat: l.lat, lng: l.lng, precisao: l.precisao,
+      endereco: l.endereco || "", numero: l.numero || "", geoQuery: queryEnd(l.endereco, l.numero), lat: l.lat, lng: l.lng, precisao: l.precisao,
       estado: "ja_fomos", atributos: [], maps: "", privado: !!l.privado, editavelLocal: true };
     renderForm();
   });
@@ -1127,7 +1151,9 @@ document.addEventListener("click", function(e){
     case "abrirAdminLocal": return go("#/admin/local/" + d.id);
     case "excluirLocal": return excluirLocalAdmin();
     case "trocarCidade": S.form.editCidade = true; renderEnderecoExtras(); return $("fCidade") && $("fCidade").focus();
-    case "usarEndereco": $("fEndereco").value = S.form.endAtual; S.form.endereco = S.form.endAtual; return renderEnderecoExtras();
+    case "usarEndereco": $("fEndereco").value = S.form.endAtual; S.form.endereco = S.form.endAtual;
+      $("fNumero").value = S.form.numAtual || ""; S.form.numero = S.form.numAtual || "";
+      renderEnderecoExtras(); return agendarGeocode();
     case "fPrivado": S.form.privado = !S.form.privado; return el.classList.toggle("on", S.form.privado);
     case "mesclar": return abrirMesclar();
     case "mesclarPara": return mesclarPara(d.id);
