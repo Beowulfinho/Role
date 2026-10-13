@@ -1,0 +1,67 @@
+{
+  "project_info": {
+    "project_number": "779936469967",
+    "project_id": "financas-fachetools",
+    "storage_bucket": "financas-fachetools.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:779936469967:android:59ae0d8d43272afe0778ba",
+        "android_client_info": {
+          "package_name": "com.beowulfinho.role"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC1zAl4mK41DEeed5eaie2Swi-b_9kTBfc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:779936469967:android:80b88931e1ab425d0778ba",
+        "android_client_info": {
+          "package_name": "com.fachetools.financas"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC1zAl4mK41DEeed5eaie2Swi-b_9kTBfc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:779936469967:android:a6379a3417fb1db30778ba",
+        "android_client_info": {
+          "package_name": "com.fachetools.planes"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC1zAl4mK41DEeed5eaie2Swi-b_9kTBfc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
