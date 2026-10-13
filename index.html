@@ -134,6 +134,15 @@
   .lbx{top:calc(14px + env(safe-area-inset-top));right:14px}
   .lbn{top:50%;transform:translateY(-50%)} .lbp{left:10px} .lbq{right:10px}
   .lbc{position:absolute;bottom:calc(18px + env(safe-area-inset-bottom));left:0;right:0;text-align:center;color:#fff;font-size:14px}
+  .dot{position:absolute;top:6px;right:7px;width:9px;height:9px;border-radius:50%;background:var(--accent);border:2px solid var(--card)}
+  .badge{display:inline-block;background:var(--accent);color:var(--accent-ink);border-radius:999px;padding:1px 8px;font-size:12px;font-weight:700;margin-left:6px}
+  .menu-bg{position:fixed;inset:0;z-index:25}
+  .menu{position:absolute;top:calc(58px + env(safe-area-inset-top));right:max(16px,calc(50% - 264px));min-width:220px;background:var(--card);
+    border:1px solid var(--line);border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.22);padding:6px}
+  .menu button{display:flex;align-items:center;width:100%;text-align:left;border:0;background:transparent;padding:12px;border-radius:10px;font-size:15px;color:var(--ink)}
+  .menu button:active{background:var(--accent-soft)}
+  .avatar{width:84px;height:84px;border-radius:50%;background:var(--accent);color:var(--accent-ink);display:inline-flex;align-items:center;justify-content:center;
+    font-family:"Bricolage Grotesque",sans-serif;font-weight:700;font-size:38px}
   .rev{border-top:1px solid var(--line);padding-top:10px;margin-top:10px}
   .rev:first-child{border-top:0;padding-top:0;margin-top:0}
 </style>
@@ -278,6 +287,7 @@ function route(){
   var r = p[0] || "";
   if (r === "publico" && p[1]) return viewPublico(p[1]);
   if (r === "amigos") return viewAmigos();
+  if (r === "perfil") return viewPerfil();
   if (r === "g" && p[1]){
     var gid = p[1];
     var pronto = (S.grupo && S.grupo.id === gid && !S.somenteLeitura) ? Promise.resolve() : (app.innerHTML = '<p class="empty">Carregando…</p>', carregarGrupo(gid));
@@ -332,21 +342,71 @@ function fazerAuth(){
 /* ---------- grupos ---------- */
 function viewGrupos(){
   var nome = S.perfis[S.user.id] ? S.perfis[S.user.id].nome : (S.user.user_metadata && S.user.user_metadata.full_name) || "";
-  var h = '<div class="top"><h1>Seus grupos</h1><button class="iconbtn" data-act="sair">Sair</button></div>';
+  var pend = pedidosRecebidos().length;
+  var h = '<div class="top"><h1>Seus grupos</h1><button class="iconbtn" data-act="menu" aria-label="Menu" style="position:relative;font-size:20px;line-height:1">⋮' +
+    (pend ? '<span class="dot"></span>' : '') + '</button></div>';
   if (nome) h += '<p class="muted" style="margin-top:0">Olá, ' + esc(nome) + '!</p>';
-  if (!S.grupos.length){
+  var lista = S.grupos.filter(function(g){ return g.tipo !== "pessoal"; });
+  if (!lista.length){
     h += '<div class="empty"><div class="big">👫</div>Crie um grupo para o casal ou os amigos,<br>ou entre com um código de convite.</div>';
   }
-  S.grupos.forEach(function(g){
+  lista.forEach(function(g){
     h += '<div class="card click" data-act="abrirGrupo" data-id="' + esc(g.id) + '"><div class="row"><div class="grow">' +
-      '<div class="title">' + (g.tipo === "pessoal" ? "👤 " : "") + esc(g.nome) + '</div><div class="faint">' + (g.tipo === "pessoal" ? "Só meu" : g.tipo === "casal" ? "Casal" : "Amigos") + '</div></div><span>›</span></div></div>';
+      '<div class="title">' + esc(g.nome) + '</div><div class="faint">' + (g.tipo === "casal" ? "Casal" : "Amigos") + '</div></div><span>›</span></div></div>';
   });
   h += '<hr><div class="stack">' +
     '<button class="btn" data-act="sheetCriar">Criar grupo</button>' +
-    '<button class="btn sec" data-act="sheetEntrar">Entrar com código</button>' +
-    '<button class="btn sec" data-act="irAmigos">👥 Amigos' + (pedidosRecebidos().length ? ' · ' + pedidosRecebidos().length + (pedidosRecebidos().length === 1 ? " pedido" : " pedidos") : "") + '</button></div>';
+    '<button class="btn sec" data-act="sheetEntrar">Entrar com código</button></div>';
   app.innerHTML = h;
   if (S.grupos.length === 1 && S.grupos[0].tipo !== "pessoal" && !S._grupoAuto){ S._grupoAuto = true; go("#/g/" + S.grupos[0].id); }
+}
+
+/* ---------- menu ⋮ e perfil ---------- */
+function fecharMenu(){ var m = $("menuPop"); if (m) m.remove(); }
+function abrirMenu(){
+  fecharMenu();
+  var pend = pedidosRecebidos().length;
+  var item = function(acao, texto){ return '<button type="button" data-act="' + acao + '">' + texto + '</button>'; };
+  var m = document.createElement("div"); m.id = "menuPop"; m.className = "menu-bg";
+  m.innerHTML = '<div class="menu">' +
+    item("irPerfil", "👤 Meu perfil") + item("abrirPessoal", "📒 Meu catálogo") +
+    item("irAmigos", "👥 Amigos" + (pend ? ' <span class="badge">' + pend + '</span>' : '')) +
+    '<hr style="margin:4px 0">' + item("sair", "↪ Sair") + '</div>';
+  m.addEventListener("click", function(e){ if (e.target === m) fecharMenu(); });
+  document.body.appendChild(m);
+}
+function abrirPessoal(){
+  var p = S.grupos.filter(function(g){ return g.tipo === "pessoal"; })[0];
+  if (p) return go("#/g/" + p.id);
+  sb.rpc("garantir_catalogo_pessoal").then(function(){ return carregarGrupos(); }).then(function(){
+    var q = S.grupos.filter(function(g){ return g.tipo === "pessoal"; })[0];
+    if (q) go("#/g/" + q.id); else toast("Não consegui abrir seu catálogo.");
+  }).catch(function(e){ toast(traduzErro(e)); });
+}
+function viewPerfil(){
+  limparMapaGrupo();
+  var nome = S.perfis[S.user.id] ? S.perfis[S.user.id].nome : (S.user.user_metadata && S.user.user_metadata.full_name) || "";
+  var inicial = (nome || S.user.email || "?").trim().charAt(0).toUpperCase();
+  app.innerHTML = '<div class="top"><button class="iconbtn" data-act="irGrupos">‹</button><h1>Meu perfil</h1></div>' +
+    '<div class="center" style="margin:10px 0 18px"><div class="avatar">' + esc(inicial) + '</div></div>' +
+    '<div class="stack">' +
+      '<div><label class="f" for="pNome">Nome</label><input type="text" id="pNome" maxlength="60" autocomplete="name" value="' + esc(nome) + '">' +
+        '<div class="faint" style="margin-top:6px">É o nome que seus amigos e o seu catálogo público mostram.</div></div>' +
+      '<div><label class="f">E-mail</label><div class="muted">' + esc(S.user.email || "") + '</div></div>' +
+      '<div class="err" id="pErr"></div><button class="btn" id="pOk" data-act="salvarPerfil">Salvar</button>' +
+    '</div>';
+}
+function salvarPerfil(){
+  var nome = ($("pNome").value || "").trim(), err = $("pErr");
+  err.textContent = "";
+  if (!nome){ err.textContent = "Digite seu nome."; return; }
+  $("pOk").disabled = true;
+  sb.from("perfis").update({ nome: nome }).eq("id", S.user.id).select("id,nome").then(function(r){
+    $("pOk").disabled = false;
+    if (r.error || !r.data || !r.data.length){ err.textContent = r.error ? traduzErro(r.error) : "Não foi possível salvar."; return; }
+    S.perfis[S.user.id] = r.data[0];
+    toast("Perfil atualizado.");
+  });
 }
 function abrirSheet(html){
   fecharSheet();
@@ -1372,6 +1432,7 @@ document.addEventListener("click", function(e){
   var el = e.target.closest("[data-act]");
   if (!el) return;
   var a = el.getAttribute("data-act"), d = el.dataset, g = S.grupo && S.grupo.id;
+  if (el.closest("#menuPop")) fecharMenu();
   switch (a){
     case "auth": return fazerAuth();
     case "authModo": S.authModo = S.authModo === "login" ? "cadastro" : "login"; return viewAuth();
@@ -1426,6 +1487,10 @@ document.addEventListener("click", function(e){
     case "fotoPrev": S.lb.i = (S.lb.i + S.lb.caminhos.length - 1) % S.lb.caminhos.length; return mostrarFoto();
     case "fotoNext": S.lb.i = (S.lb.i + 1) % S.lb.caminhos.length; return mostrarFoto();
     case "irAmigos": return go("#/amigos");
+    case "menu": return abrirMenu();
+    case "irPerfil": return go("#/perfil");
+    case "abrirPessoal": return abrirPessoal();
+    case "salvarPerfil": return salvarPerfil();
     case "copiarLinkAmigo":
       if (navigator.clipboard) navigator.clipboard.writeText(S.linkAmigo).then(function(){ toast("Link copiado"); });
       return;
