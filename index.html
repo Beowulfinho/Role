@@ -441,6 +441,8 @@ function renderCards(){
     var datas = (l.visitas || []).map(function(v){ return v.data; }).sort();
     if (datas.length) meta.push("📅 " + fmtData(datas[datas.length - 1]));
     if (s.nVisitas > 1) meta.push(s.nVisitas + " rolês");
+    var ultV = (l.visitas || []).slice().sort(function(a, b){ return a.data < b.data ? 1 : -1; })[0];
+    if (ultV && ultV.delivery) meta.push("🛵 delivery");
     var comFoto = (l.visitas || []).slice().sort(function(a, b){ return a.data < b.data ? 1 : -1; }).filter(function(v){ return (v.fotos || []).length; })[0];
     var capa = comFoto ? ordenarFotos(comFoto)[0] : null;
     if (s.gastoPP != null) meta.push(fmtMoney(s.gastoPP) + "/pessoa");
@@ -502,7 +504,9 @@ function renderMapa(lista){
   var box = $("cards");
   if (!window.L){ box.innerHTML = '<div class="empty">Mapa indisponível agora.</div>'; return; }
   var comLoc = lista.filter(function(x){ return x.l.lat != null && x.l.lng != null; });
+  var mapaNovo = false;
   if (!S.mapaG || !box.contains(S.mapaG.getContainer())){
+    mapaNovo = true;
     limparMapaGrupo();
     box.innerHTML = '<div id="mapaGrupo" class="map big"></div>' +
       '<div class="faint" id="mapaInfo" style="margin-top:8px;padding-right:120px"></div>';
@@ -525,11 +529,13 @@ function renderMapa(lista){
   var sem = lista.length - comLoc.length;
   $("mapaInfo").textContent = comLoc.length + (comLoc.length === 1 ? " lugar no mapa" : " lugares no mapa") +
     (sem ? " · " + sem + " sem localização" + (S.somenteLeitura ? "" : " (edite o lugar para marcar)") : "");
+  if (mapaNovo) mapaOndeEstou(true);
 }
-function mapaOndeEstou(){
+function mapaOndeEstou(auto){
+  var silencioso = auto === true;
   pedirLocalizacao(function(){
     if (!S.mapaG) return;
-    if (GEO.lat == null){ toast("Não consegui sua localização. Permita o acesso no navegador."); return; }
+    if (GEO.lat == null){ if (!silencioso) toast("Não consegui sua localização. Permita o acesso no navegador."); return; }
     if (S.mapaEu) S.mapaEu.remove();
     S.mapaEu = L.marker([GEO.lat, GEO.lng], { interactive: false, icon: L.divIcon({ className: "mkwrap", html: '<div class="eu"></div>', iconSize: [16, 16], iconAnchor: [8, 8] }) }).addTo(S.mapaG);
     S.mapaG.setView([GEO.lat, GEO.lng], Math.max(S.mapaG.getZoom(), 15));
@@ -640,7 +646,7 @@ function viewLugar(id){
   visitas.forEach(function(v){
     var avs = v.avaliacoes || [], minha = avs.filter(function(a){ return a.user_id === eu; })[0];
     h += '<div class="card"><div class="row" style="margin-bottom:8px"><div class="grow"><b>' + fmtData(v.data) + '</b>' +
-      '<div class="faint">' + [v.gasto_total != null ? fmtMoney(Number(v.gasto_total)) : null, v.num_pessoas ? v.num_pessoas + " pessoa(s)" : null].filter(Boolean).join(" · ") + '</div></div>' +
+      '<div class="faint">' + [v.delivery ? "🛵 Delivery" : null, v.gasto_total != null ? fmtMoney(Number(v.gasto_total)) : null, v.num_pessoas ? v.num_pessoas + " pessoa(s)" : null].filter(Boolean).join(" · ") + '</div></div>' +
       '<button class="btn sec small" data-act="visita" data-l="' + esc(l.id) + '" data-v="' + esc(v.id) + '">' + (minha ? "Editar" : "Avaliar") + '</button></div>';
     h += stripFotos(v);
     avs.forEach(function(a){
@@ -1153,6 +1159,7 @@ function viewFormVisita(lugarId, visitaId){
   S.form = {
     lugarId: lugarId, visitaId: visitaId,
     cb: minha ? minha.custo_beneficio : null, voltaria: minha ? minha.voltaria : null,
+    delivery: v ? !!v.delivery : false,
     fotosExist: v ? ordenarFotos(v) : [], fotosNovas: [], fotosRemover: []
   };
   var nota = minha ? Number(minha.nota) : 8;
@@ -1161,6 +1168,9 @@ function viewFormVisita(lugarId, visitaId){
       (fmtEnd(l) ? '<div class="faint">' + esc(fmtEnd(l)) + '</div>' : '') + '</div>' +
     '<div class="row"><div class="grow"><label class="f" for="vData">Data do rolê</label><input type="date" id="vData" max="' + hoje() + '" value="' + esc(v ? v.data : hoje()) + '"></div>' +
       '<div class="grow"><label class="f" for="vPessoas">Pessoas</label><input type="number" id="vPessoas" min="1" max="99" inputmode="numeric" value="' + (v && v.num_pessoas ? v.num_pessoas : (S.membros.length || 2)) + '"></div></div>' +
+    '<div><label class="f">Como foi?</label><div class="chips" id="gDelivery">' +
+      '<button type="button" class="chip ' + (!S.form.delivery ? "on" : "") + '" data-act="fSingle" data-g="delivery" data-v="false">🍽️ Presencial</button>' +
+      '<button type="button" class="chip ' + (S.form.delivery ? "on" : "") + '" data-act="fSingle" data-g="delivery" data-v="true">🛵 Delivery</button></div></div>' +
     '<div><label class="f" for="vGasto">Quanto gastaram no total (R$)</label><input type="number" id="vGasto" min="0" step="0.01" inputmode="decimal" placeholder="Opcional" value="' + (v && v.gasto_total != null ? v.gasto_total : "") + '"></div>' +
     '<div><label class="f">Fotos</label><div class="fotos-grid" id="fotosBox"></div>' +
       '<input type="file" id="fFotos" accept="image/*" multiple hidden>' +
@@ -1192,7 +1202,8 @@ function salvarVisita(){
   var vis = {
     data: data,
     gasto_total: gasto === "" ? null : Number(gasto),
-    num_pessoas: pessoas === "" ? null : parseInt(pessoas, 10)
+    num_pessoas: pessoas === "" ? null : parseInt(pessoas, 10),
+    delivery: !!f.delivery
   };
   var av = {
     nota: Number($("vNota").value), custo_beneficio: f.cb || null, voltaria: f.voltaria || null,
@@ -1279,7 +1290,7 @@ document.addEventListener("click", function(e){
     case "visita": return go("#/g/" + g + "/visita/" + d.l + (d.v ? "/" + d.v : ""));
     case "fSingle":
       var v = d.v, key = d.g;
-      S.form[key] = (key === "cb") ? parseInt(v, 10) : v;
+      S.form[key] = (key === "cb") ? parseInt(v, 10) : (key === "delivery") ? v === "true" : v;
       return marcar(el.parentNode, el, false);
     case "fMulti":
       var i = S.form.atributos.indexOf(d.v);
