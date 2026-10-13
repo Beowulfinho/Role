@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#D9552B">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Rolê">
+<title>Rolê</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Inter:wght@400;500;600&display=swap">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<style>
+  :root{
+    --bg:#FAF6F1; --card:#FFFFFF; --ink:#26211D; --ink-soft:#6B625A; --ink-faint:#9C9389;
+    --line:#E8E0D6; --accent:#D9552B; --accent-ink:#FFFFFF; --accent-soft:#FBE3D9;
+    --good:#2E7D4F; --good-soft:#DDEFE3; --mid:#B07A12; --mid-soft:#F6EAC8; --bad:#B53A2D; --bad-soft:#F6DCD7;
+    --shadow:0 1px 2px rgba(38,33,29,.06),0 4px 14px rgba(38,33,29,.06);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#171412; --card:#221E1B; --ink:#F3EDE6; --ink-soft:#B3A99F; --ink-faint:#837A71;
+      --line:#383129; --accent:#EE6B40; --accent-ink:#1B120E; --accent-soft:#40231A;
+      --good:#6CC48C; --good-soft:#1E3326; --mid:#E2B24A; --mid-soft:#3A2F15; --bad:#EE7E70; --bad-soft:#3F211D;
+      --shadow:none;
+    }
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,system-ui,sans-serif;font-size:16px;line-height:1.4}
+  h1,h2,h3{font-family:"Bricolage Grotesque",Inter,sans-serif;margin:0;letter-spacing:-.01em}
+  button{font:inherit;color:inherit;cursor:pointer}
+  input,textarea,select{font:inherit;color:var(--ink)}
+  #app{max-width:560px;margin:0 auto;min-height:100vh;padding:0 16px calc(96px + env(safe-area-inset-bottom))}
+  .top{display:flex;align-items:center;gap:10px;padding:calc(14px + env(safe-area-inset-top)) 0 10px;position:sticky;top:0;background:var(--bg);z-index:5}
+  .top h1{font-size:22px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .iconbtn{border:1px solid var(--line);background:var(--card);border-radius:12px;height:40px;min-width:40px;padding:0 12px;font-weight:600}
+  .btn{border:0;background:var(--accent);color:var(--accent-ink);border-radius:14px;padding:13px 18px;font-weight:600;width:100%}
+  .btn.sec{background:var(--card);color:var(--ink);border:1px solid var(--line)}
+  .btn.danger{background:transparent;color:var(--bad);border:1px solid var(--line)}
+  .btn.small{width:auto;padding:8px 14px;border-radius:10px;font-size:14px}
+  .btn:disabled{opacity:.55}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;box-shadow:var(--shadow);margin-bottom:10px}
+  .card.click{cursor:pointer}
+  .row{display:flex;align-items:center;gap:10px}
+  .grow{flex:1;min-width:0}
+  .muted{color:var(--ink-soft);font-size:14px}
+  .faint{color:var(--ink-faint);font-size:13px}
+  .title{font-weight:600;font-size:17px}
+  .stack{display:flex;flex-direction:column;gap:12px}
+  label.f{display:block;font-size:13px;font-weight:600;color:var(--ink-soft);margin-bottom:6px}
+  input[type=text],input[type=email],input[type=password],input[type=date],input[type=number],input[type=url],textarea{
+    width:100%;border:1px solid var(--line);background:var(--card);border-radius:12px;padding:12px 13px;outline:none}
+  input:focus,textarea:focus{border-color:var(--accent)}
+  textarea{min-height:80px;resize:vertical}
+  .chips{display:flex;flex-wrap:wrap;gap:8px}
+  .chip{border:1px solid var(--line);background:var(--card);border-radius:999px;padding:7px 13px;font-size:14px}
+  .chip.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+  .chips.scroll{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px;scrollbar-width:none;margin:0 -16px;padding:0 16px 4px}
+  .chips.scroll::-webkit-scrollbar{display:none}
+  .chips.scroll .chip{white-space:nowrap;flex:none}
+  .tabs{display:flex;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:4px;gap:4px}
+  .tabs button{flex:1;border:0;background:transparent;border-radius:10px;padding:9px;font-weight:600;color:var(--ink-soft)}
+  .tabs button.on{background:var(--accent);color:var(--accent-ink)}
+  .score{min-width:46px;height:46px;border-radius:13px;display:flex;align-items:center;justify-content:center;font-family:"Bricolage Grotesque",sans-serif;font-weight:700;font-size:19px;flex:none}
+  .score.good{background:var(--good-soft);color:var(--good)} .score.mid{background:var(--mid-soft);color:var(--mid)}
+  .score.bad{background:var(--bad-soft);color:var(--bad)} .score.none{background:var(--line);color:var(--ink-faint)}
+  .tag{display:inline-block;background:var(--accent-soft);color:var(--accent);border-radius:8px;padding:3px 9px;font-size:12.5px;font-weight:600;margin:0 6px 6px 0}
+  .tag.plain{background:var(--line);color:var(--ink-soft)}
+  .stats{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:10px}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px}
+  .stat b{display:block;font-family:"Bricolage Grotesque",sans-serif;font-size:22px}
+  .stat span{font-size:12.5px;color:var(--ink-soft)}
+  .err{color:var(--bad);font-size:14px;min-height:20px}
+  .ok{color:var(--good);font-size:14px}
+  .center{text-align:center}
+  .empty{text-align:center;color:var(--ink-soft);padding:36px 12px}
+  .empty .big{font-size:42px;margin-bottom:6px}
+  .fab{position:fixed;right:max(16px,calc(50% - 264px));bottom:calc(20px + env(safe-area-inset-bottom));border:0;background:var(--accent);color:var(--accent-ink);
+    border-radius:18px;padding:14px 20px;font-weight:700;box-shadow:0 6px 18px rgba(217,85,43,.4);z-index:6}
+  .notarow{display:flex;align-items:center;gap:14px}
+  .notarow .score{min-width:64px;height:64px;font-size:28px}
+  input[type=range]{width:100%;accent-color:var(--accent)}
+  .sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:20;display:flex;align-items:flex-end;justify-content:center}
+  .sheet{background:var(--bg);border-radius:22px 22px 0 0;padding:20px 16px calc(20px + env(safe-area-inset-bottom));width:100%;max-width:560px}
+  .code{font-family:"Bricolage Grotesque",sans-serif;font-size:34px;letter-spacing:.18em;font-weight:700;text-align:center;margin:10px 0}
+  .toast{position:fixed;left:50%;bottom:calc(90px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--ink);color:var(--bg);
+    padding:10px 16px;border-radius:12px;font-size:14px;z-index:30;max-width:90%}
+  .hint{font-size:13px;color:var(--mid);margin-top:6px}
+  a{color:var(--accent)}
+  hr{border:0;border-top:1px solid var(--line);margin:14px 0}
+  .brand{font-family:"Bricolage Grotesque",sans-serif;font-size:44px;font-weight:700;color:var(--accent);text-align:center;margin:44px 0 4px}
+  .rev{border-top:1px solid var(--line);padding-top:10px;margin-top:10px}
+  .rev:first-child{border-top:0;padding-top:0;margin-top:0}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+(function(){
+"use strict";
+
+var SUPABASE_URL = "https://wyirmfuinpaaeodpbwcz.supabase.co";
+var SUPABASE_KEY = "sb_publishable_yDuhiwR42Hwi2iWgKWSU3g_RmCvYwMS";
+var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+var CATEGORIAS = [
+  ["restaurante","🍽️","Restaurante"],["boteco","🍻","Boteco"],["bar","🍸","Bar"],["rodizio","🥩","Rodízio"],
+  ["self_service","⚖️","Self-service / quilo"],["pf","🍛","PF / prato feito"],["pizzaria","🍕","Pizzaria"],
+  ["hamburgueria","🍔","Hamburgueria"],["japones","🍣","Japonês"],["cafeteria","☕","Cafeteria / padaria"],
+  ["acai","🍧","Açaí / sorveteria"],["doceria","🍰","Doceria"],["balada","🪩","Balada"],["show","🎤","Show / evento"],
+  ["passeio","🌳","Parque / passeio"],["praia","🏖️","Praia"],["hotel","🏨","Hotel / pousada"],["outro","📍","Outro"]
+];
+var ATRIBUTOS = [
+  ["estacionamento","Estacionamento"],["vr_va","Aceita VR/VA"],["pix","Aceita Pix"],["pet","Pet friendly"],
+  ["crianca","Bom p/ criança"],["musica","Música ao vivo"],["reserva","Precisa reservar"],["fila","Costuma ter fila"],
+  ["externa","Área externa"],["seguro","Seguro à noite"]
+];
+var CB_LABEL = {1:"Caro demais",2:"Meio caro",3:"Justo",4:"Bom preço",5:"Vale muito"};
+var VOLTARIA = [["sim","Voltaria"],["talvez","Talvez"],["nunca_mais","Nunca mais"]];
+
+var CAT = {}; CATEGORIAS.forEach(function(c){ CAT[c[0]] = c; });
+var ATR = {}; ATRIBUTOS.forEach(function(a){ ATR[a[0]] = a[1]; });
+
+var S = {
+  user: null, grupos: [], grupo: null, membros: [], perfis: {}, lugares: [],
+  authModo: "login", aba: "ja_fomos", cat: "", busca: "", form: null
+};
+
+var app = document.getElementById("app");
+
+/* ---------- utilidades ---------- */
+function esc(v){
+  return String(v == null ? "" : v).replace(/[&<>"']/g, function(c){
+    return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
+  });
+}
+function $(id){ return document.getElementById(id); }
+function norm(s){ return String(s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase().trim(); }
+function lsGet(k){ try { return localStorage.getItem(k); } catch(e){ return null; } }
+function lsSet(k,v){ try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k,v); } catch(e){} }
+function fmtNota(n){ return n == null ? "–" : (Math.round(n*10)/10).toString().replace(".",","); }
+function fmtMoney(n){ return n == null ? "–" : n.toLocaleString("pt-BR",{style:"currency",currency:"BRL"}); }
+function fmtData(d){ var p = String(d).split("-"); return p.length === 3 ? p[2]+"/"+p[1]+"/"+p[0] : d; }
+function hoje(){ var d = new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+function avg(a){ return a.length ? a.reduce(function(x,y){return x+y;},0)/a.length : null; }
+function notaClasse(n){ return n == null ? "none" : n >= 8 ? "good" : n >= 6 ? "mid" : "bad"; }
+function nomeDe(id){ return (S.perfis[id] && S.perfis[id].nome) || "Alguém"; }
+function toast(msg){
+  var t = document.createElement("div"); t.className = "toast"; t.textContent = msg;
+  document.body.appendChild(t); setTimeout(function(){ t.remove(); }, 2600);
+}
+function traduzErro(e){
+  var m = (e && e.message) || String(e || "");
+  if (/Invalid login credentials/i.test(m)) return "E-mail ou senha incorretos.";
+  if (/already registered/i.test(m)) return "Esse e-mail já tem conta. Tente entrar.";
+  if (/Password should be/i.test(m)) return "A senha precisa ter pelo menos 6 caracteres.";
+  if (/codigo invalido/i.test(m)) return "Código de convite inválido.";
+  if (/Email not confirmed/i.test(m)) return "Confirme seu e-mail antes de entrar.";
+  if (/rate limit/i.test(m)) return "Muitas tentativas. Espere um pouco e tente de novo.";
+  return m;
+}
+function mapsUrl(l){
+  if (l.maps_url && /^https?:\/\//i.test(l.maps_url)) return l.maps_url;
+  var q = [l.nome, l.bairro, l.cidade].filter(Boolean).join(" ");
+  return "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(q);
+}
+
+/* ---------- estatísticas ---------- */
+function stats(l){
+  var vis = l.visitas || [];
+  var avs = []; vis.forEach(function(v){ (v.avaliacoes||[]).forEach(function(a){ avs.push(a); }); });
+  var gpp = vis.filter(function(v){ return v.gasto_total != null && v.num_pessoas; })
+               .map(function(v){ return Number(v.gasto_total)/v.num_pessoas; });
+  var cbs = avs.filter(function(a){ return a.custo_beneficio != null; }).map(function(a){ return a.custo_beneficio; });
+  var com = avs.filter(function(a){ return a.voltaria; });
+  return {
+    nVisitas: vis.length,
+    media: avg(avs.map(function(a){ return Number(a.nota); })),
+    cb: avg(cbs),
+    gastoPP: avg(gpp),
+    voltam: com.filter(function(a){ return a.voltaria === "sim"; }).length,
+    voltamTotal: com.length,
+    nunca: com.some(function(a){ return a.voltaria === "nunca_mais"; })
+  };
+}
+
+/* ---------- dados ---------- */
+function carregarGrupos(){
+  return sb.from("grupo_membros").select("papel, grupos(id,nome,tipo,codigo_convite)").eq("user_id", S.user.id)
+    .then(function(r){
+      if (r.error) throw r.error;
+      S.grupos = (r.data||[]).filter(function(x){ return x.grupos; }).map(function(x){
+        return { id:x.grupos.id, nome:x.grupos.nome, tipo:x.grupos.tipo, codigo:x.grupos.codigo_convite, papel:x.papel };
+      });
+    });
+}
+function carregarGrupo(id){
+  var g = S.grupos.filter(function(x){ return x.id === id; })[0];
+  if (!g) return Promise.reject(new Error("Grupo não encontrado"));
+  S.grupo = g;
+  return Promise.all([
+    sb.from("lugares").select("*, visitas(*, avaliacoes(*))").eq("grupo_id", id).order("created_at",{ascending:false}),
+    sb.from("grupo_membros").select("user_id,papel").eq("grupo_id", id),
+    sb.from("perfis").select("id,nome")
+  ]).then(function(rs){
+    rs.forEach(function(r){ if (r.error) throw r.error; });
+    S.lugares = rs[0].data || [];
+    S.membros = rs[1].data || [];
+    S.perfis = {}; (rs[2].data||[]).forEach(function(p){ S.perfis[p.id] = p; });
+  });
+}
+function lugarPorId(id){ return S.lugares.filter(function(l){ return l.id === id; })[0]; }
+
+/* ---------- roteamento ---------- */
+function go(h){ if (location.hash === h) route(); else location.hash = h; }
+function route(){
+  if (!S.user) return viewAuth();
+  var p = (location.hash || "").replace(/^#\/?/, "").split("/");
+  var r = p[0] || "";
+  if (r === "g" && p[1]){
+    var gid = p[1];
+    var pronto = (S.grupo && S.grupo.id === gid) ? Promise.resolve() : (app.innerHTML = '<p class="empty">Carregando…</p>', carregarGrupo(gid));
+    pronto.then(function(){
+      lsSet("role_grupo", gid);
+      var sub = p[2] || "";
+      if (sub === "lugar" && p[3]) return viewLugar(p[3]);
+      if (sub === "novo") return viewFormLugar(null);
+      if (sub === "editar" && p[3]) return viewFormLugar(p[3]);
+      if (sub === "visita" && p[3]) return viewFormVisita(p[3], p[4] || null);
+      viewLista();
+    }).catch(function(e){ toast(traduzErro(e)); go("#/grupos"); });
+    return;
+  }
+  viewGrupos();
+}
+window.addEventListener("hashchange", route);
+
+/* ---------- auth ---------- */
+function viewAuth(){
+  var cad = S.authModo === "cadastro";
+  app.innerHTML =
+    '<div class="brand">Rolê</div>' +
+    '<p class="center muted" style="margin:0 0 26px">Onde vocês foram, o que acharam e se voltariam.</p>' +
+    '<div class="stack">' +
+      (cad ? '<div><label class="f" for="aNome">Seu nome</label><input type="text" id="aNome" autocomplete="name"></div>' : '') +
+      '<div><label class="f" for="aEmail">E-mail</label><input type="email" id="aEmail" autocomplete="email" inputmode="email"></div>' +
+      '<div><label class="f" for="aSenha">Senha</label><input type="password" id="aSenha" autocomplete="' + (cad ? "new-password" : "current-password") + '"></div>' +
+      '<div class="err" id="aErr"></div>' +
+      '<button class="btn" id="aOk" data-act="auth">' + (cad ? "Criar conta" : "Entrar") + '</button>' +
+      '<button class="btn sec" data-act="authModo">' + (cad ? "Já tenho conta" : "Criar uma conta") + '</button>' +
+    '</div>';
+}
+function fazerAuth(){
+  var email = $("aEmail").value.trim(), senha = $("aSenha").value, nome = $("aNome") ? $("aNome").value.trim() : "";
+  var err = $("aErr"); err.className = "err"; err.textContent = "";
+  if (!email || !senha){ err.textContent = "Preencha e-mail e senha."; return; }
+  if (S.authModo === "cadastro" && !nome){ err.textContent = "Diga seu nome."; return; }
+  $("aOk").disabled = true;
+  var op = S.authModo === "cadastro"
+    ? sb.auth.signUp({ email: email, password: senha, options: { data: { full_name: nome } } })
+    : sb.auth.signInWithPassword({ email: email, password: senha });
+  op.then(function(r){
+    $("aOk").disabled = false;
+    if (r.error){ err.textContent = traduzErro(r.error); return; }
+    if (S.authModo === "cadastro" && !r.data.session){
+      err.className = "ok"; err.textContent = "Conta criada! Confirme seu e-mail e depois entre.";
+    }
+  });
+}
+
+/* ---------- grupos ---------- */
+function viewGrupos(){
+  var nome = S.perfis[S.user.id] ? S.perfis[S.user.id].nome : (S.user.user_metadata && S.user.user_metadata.full_name) || "";
+  var h = '<div class="top"><h1>Seus grupos</h1><button class="iconbtn" data-act="sair">Sair</button></div>';
+  if (nome) h += '<p class="muted" style="margin-top:0">Olá, ' + esc(nome) + '!</p>';
+  if (!S.grupos.length){
+    h += '<div class="empty"><div class="big">👫</div>Crie um grupo para o casal ou os amigos,<br>ou entre com um código de convite.</div>';
+  }
+  S.grupos.forEach(function(g){
+    h += '<div class="card click" data-act="abrirGrupo" data-id="' + esc(g.id) + '"><div class="row"><div class="grow">' +
+      '<div class="title">' + esc(g.nome) + '</div><div class="faint">' + (g.tipo === "casal" ? "Casal" : "Amigos") + '</div></div><span>›</span></div></div>';
+  });
+  h += '<hr><div class="stack">' +
+    '<button class="btn" data-act="sheetCriar">Criar grupo</button>' +
+    '<button class="btn sec" data-act="sheetEntrar">Entrar com código</button></div>';
+  app.innerHTML = h;
+  if (S.grupos.length === 1 && !S._grupoAuto){ S._grupoAuto = true; go("#/g/" + S.grupos[0].id); }
+}
+function abrirSheet(html){
+  fecharSheet();
+  var bg = document.createElement("div"); bg.className = "sheet-bg"; bg.id = "sheet";
+  bg.innerHTML = '<div class="sheet">' + html + '</div>';
+  bg.addEventListener("click", function(e){ if (e.target === bg) fecharSheet(); });
+  document.body.appendChild(bg);
+}
+function fecharSheet(){ var s = $("sheet"); if (s) s.remove(); }
+function sheetCriar(){
+  S.sheetTipo = "casal";
+  abrirSheet('<h2 style="margin-bottom:12px">Novo grupo</h2><div class="stack">' +
+    '<div><label class="f" for="gNome">Nome do grupo</label><input type="text" id="gNome" maxlength="60" placeholder="Ex.: Os facheros"></div>' +
+    '<div><label class="f">Tipo</label><div class="chips" id="gTipo">' +
+      '<button class="chip on" data-act="gTipo" data-v="casal">Casal</button><button class="chip" data-act="gTipo" data-v="amigos">Amigos</button></div></div>' +
+    '<div class="err" id="gErr"></div><button class="btn" id="gOk" data-act="criarGrupo">Criar</button></div>');
+  $("gNome").focus();
+}
+function sheetEntrar(){
+  abrirSheet('<h2 style="margin-bottom:12px">Entrar em um grupo</h2><div class="stack">' +
+    '<div><label class="f" for="gCod">Código de convite</label><input type="text" id="gCod" maxlength="6" autocapitalize="characters" placeholder="ABC123"></div>' +
+    '<div class="err" id="gErr"></div><button class="btn" id="gOk" data-act="entrarGrupo">Entrar</button></div>');
+  $("gCod").focus();
+}
+function criarGrupo(){
+  var nome = $("gNome").value.trim();
+  if (!nome){ $("gErr").textContent = "Dê um nome ao grupo."; return; }
+  $("gOk").disabled = true;
+  sb.rpc("criar_grupo", { p_nome: nome, p_tipo: S.sheetTipo }).then(function(r){
+    if (r.error){ $("gOk").disabled = false; $("gErr").textContent = traduzErro(r.error); return; }
+    fecharSheet();
+    carregarGrupos().then(function(){ S.grupo = null; go("#/g/" + r.data); });
+  });
+}
+function entrarGrupo(codigo, silencioso){
+  return sb.rpc("entrar_grupo", { p_codigo: codigo }).then(function(r){
+    if (r.error){
+      if (silencioso){ toast(traduzErro(r.error)); return null; }
+      $("gOk").disabled = false; $("gErr").textContent = traduzErro(r.error); return null;
+    }
+    fecharSheet();
+    return carregarGrupos().then(function(){ S.grupo = null; go("#/g/" + r.data); });
+  });
+}
+
+/* ---------- lista de lugares ---------- */
+function viewLista(){
+  var g = S.grupo;
+  var h = '<div class="top"><button class="iconbtn" data-act="irGrupos" aria-label="Grupos">‹</button><h1>' + esc(g.nome) + '</h1>' +
+    '<button class="iconbtn" data-act="convidar">Convidar</button></div>' +
+    '<div class="tabs" style="margin-bottom:12px">' +
+      '<button data-act="aba" data-v="ja_fomos" class="' + (S.aba === "ja_fomos" ? "on" : "") + '">Já fomos</button>' +
+      '<button data-act="aba" data-v="quero_ir" class="' + (S.aba === "quero_ir" ? "on" : "") + '">Quero ir</button></div>' +
+    '<input type="text" id="busca" placeholder="Buscar lugar…" value="' + esc(S.busca) + '" style="margin-bottom:10px">' +
+    '<div class="chips scroll" id="catChips" style="margin-bottom:12px"></div>' +
+    '<div id="cards"></div>' +
+    '<button class="fab" data-act="novoLugar">+ Lugar</button>';
+  app.innerHTML = h;
+  $("busca").addEventListener("input", function(e){ S.busca = e.target.value; renderCards(); });
+  renderCards();
+}
+function renderCards(){
+  var q = norm(S.busca);
+  var daAba = S.lugares.filter(function(l){ return l.estado === S.aba; });
+  var cats = {}; daAba.forEach(function(l){ cats[l.categoria] = true; });
+  var ch = '<button class="chip ' + (!S.cat ? "on" : "") + '" data-act="cat" data-v="">Todos</button>';
+  CATEGORIAS.forEach(function(c){
+    if (cats[c[0]]) ch += '<button class="chip ' + (S.cat === c[0] ? "on" : "") + '" data-act="cat" data-v="' + c[0] + '">' + c[1] + " " + esc(c[2]) + "</button>";
+  });
+  $("catChips").innerHTML = ch;
+  var lista = daAba.filter(function(l){
+    return (!S.cat || l.categoria === S.cat) && (!q || norm(l.nome + " " + (l.bairro||"") + " " + (l.cidade||"")).indexOf(q) >= 0);
+  }).map(function(l){ return { l:l, s:stats(l) }; });
+  if (S.aba === "ja_fomos") lista.sort(function(a,b){ return (b.s.media == null ? -1 : b.s.media) - (a.s.media == null ? -1 : a.s.media); });
+  var h = "";
+  lista.forEach(function(x){
+    var l = x.l, s = x.s, c = CAT[l.categoria] || CAT.outro;
+    var sub = [c[1] + " " + c[2], l.bairro, l.cidade].filter(Boolean).map(esc).join(" · ");
+    var meta = [];
+    if (s.nVisitas) meta.push(s.nVisitas + (s.nVisitas === 1 ? " visita" : " visitas"));
+    if (s.gastoPP != null) meta.push(fmtMoney(s.gastoPP) + "/pessoa");
+    if (s.voltamTotal) meta.push(s.voltam + "/" + s.voltamTotal + " voltariam");
+    h += '<div class="card click" data-act="abrirLugar" data-id="' + esc(l.id) + '"><div class="row">' +
+      (S.aba === "ja_fomos" ? '<div class="score ' + notaClasse(s.media) + '">' + fmtNota(s.media) + '</div>' : '') +
+      '<div class="grow"><div class="title">' + esc(l.nome) + (s.nunca ? ' <span class="faint">🚫</span>' : '') + '</div>' +
+      '<div class="muted">' + sub + '</div>' + (meta.length ? '<div class="faint">' + esc(meta.join(" · ")) + '</div>' : '') +
+      '</div></div></div>';
+  });
+  if (!lista.length){
+    h = '<div class="empty"><div class="big">' + (S.aba === "ja_fomos" ? "🍽️" : "✨") + '</div>' +
+      (S.lugares.length ? "Nada por aqui com esses filtros." : "Nenhum lugar ainda.<br>Toque em <b>+ Lugar</b> para começar.") + '</div>';
+  }
+  $("cards").innerHTML = h;
+}
+function convidar(){
+  var g = S.grupo;
+  var link = location.origin + location.pathname + "?codigo=" + encodeURIComponent(g.codigo);
+  S.convite = { link: link, texto: "Entra no nosso grupo \"" + g.nome + "\" no Rolê! Código: " + g.codigo + "\n" + link };
+  abrirSheet('<h2>Convidar para ' + esc(g.nome) + '</h2><div class="code">' + esc(g.codigo) + '</div>' +
+    '<p class="muted center" style="margin-top:0">Quem entrar com esse código vê todos os lugares do grupo.</p>' +
+    '<div class="stack"><a class="btn" style="text-decoration:none;text-align:center" target="_blank" rel="noopener" href="https://wa.me/?text=' + encodeURIComponent(S.convite.texto) + '">Enviar pelo WhatsApp</a>' +
+    '<button class="btn sec" data-act="copiarConvite">Copiar convite</button></div>');
+}
+
+/* ---------- detalhe do lugar ---------- */
+function viewLugar(id){
+  var l = lugarPorId(id);
+  if (!l) return go("#/g/" + S.grupo.id);
+  var s = stats(l), c = CAT[l.categoria] || CAT.outro, eu = S.user.id;
+  var sub = [c[1] + " " + c[2], l.bairro, l.cidade].filter(Boolean).map(esc).join(" · ");
+  var h = '<div class="top"><button class="iconbtn" data-act="voltarLista">‹</button><h1>' + esc(l.nome) + '</h1>' +
+    '<button class="iconbtn" data-act="editarLugar" data-id="' + esc(l.id) + '">Editar</button></div>' +
+    '<p class="muted" style="margin-top:0">' + sub + '</p>';
+  if ((l.atributos||[]).length){
+    h += '<div>' + l.atributos.map(function(a){ return '<span class="tag">' + esc(ATR[a] || a) + '</span>'; }).join("") + '</div>';
+  }
+  h += '<p style="margin:4px 0 14px"><a href="' + esc(mapsUrl(l)) + '" target="_blank" rel="noopener">Abrir no Maps ↗</a></p>';
+  if (s.nVisitas){
+    h += '<div class="stats">' +
+      '<div class="stat"><b>' + fmtNota(s.media) + '</b><span>Nota média do grupo</span></div>' +
+      '<div class="stat"><b>' + (s.cb != null ? fmtNota(s.cb) + " / 5" : "–") + '</b><span>Custo-benefício</span></div>' +
+      '<div class="stat"><b>' + fmtMoney(s.gastoPP) + '</b><span>Gasto por pessoa</span></div>' +
+      '<div class="stat"><b>' + (s.voltamTotal ? s.voltam + " de " + s.voltamTotal : "–") + '</b><span>Voltariam</span></div></div>';
+    var porPessoa = {};
+    (l.visitas||[]).forEach(function(v){ (v.avaliacoes||[]).forEach(function(a){ (porPessoa[a.user_id] = porPessoa[a.user_id] || []).push(Number(a.nota)); }); });
+    var ks = Object.keys(porPessoa);
+    if (ks.length > 1){
+      h += '<div class="card"><div class="faint" style="margin-bottom:8px">Nota de cada um</div>' + ks.map(function(k){
+        return '<div class="row" style="margin-bottom:6px"><span class="grow">' + esc(nomeDe(k)) + '</span><b>' + fmtNota(avg(porPessoa[k])) + '</b></div>';
+      }).join("") + '</div>';
+    }
+  }
+  h += '<div class="row" style="margin:14px 0 8px"><h3 class="grow">Visitas</h3></div>';
+  var visitas = (l.visitas||[]).slice().sort(function(a,b){ return a.data < b.data ? 1 : -1; });
+  if (!visitas.length) h += '<div class="empty" style="padding:20px 0">Ainda sem visitas. Registre a primeira!</div>';
+  visitas.forEach(function(v){
+    var avs = v.avaliacoes || [], minha = avs.filter(function(a){ return a.user_id === eu; })[0];
+    h += '<div class="card"><div class="row" style="margin-bottom:8px"><div class="grow"><b>' + fmtData(v.data) + '</b>' +
+      '<div class="faint">' + [v.gasto_total != null ? fmtMoney(Number(v.gasto_total)) : null, v.num_pessoas ? v.num_pessoas + " pessoa(s)" : null].filter(Boolean).join(" · ") + '</div></div>' +
+      '<button class="btn sec small" data-act="visita" data-l="' + esc(l.id) + '" data-v="' + esc(v.id) + '">' + (minha ? "Editar" : "Avaliar") + '</button></div>';
+    avs.forEach(function(a){
+      var vol = VOLTARIA.filter(function(x){ return x[0] === a.voltaria; })[0];
+      h += '<div class="rev"><div class="row"><div class="score ' + notaClasse(Number(a.nota)) + '" style="min-width:38px;height:38px;font-size:16px">' + fmtNota(Number(a.nota)) + '</div>' +
+        '<div class="grow"><b>' + esc(nomeDe(a.user_id)) + '</b><div class="faint">' +
+        [a.custo_beneficio ? "Custo-benefício: " + esc(CB_LABEL[a.custo_beneficio]) : null, vol ? esc(vol[1]) : null].filter(Boolean).join(" · ") + '</div></div></div>' +
+        (a.pedidos ? '<div class="muted" style="margin-top:6px">Pediu: ' + esc(a.pedidos) + '</div>' : '') +
+        (a.comentario ? '<div style="margin-top:4px">' + esc(a.comentario) + '</div>' : '') + '</div>';
+    });
+    if (!avs.length) h += '<div class="faint">Ninguém avaliou ainda.</div>';
+    h += '</div>';
+  });
+  h += '<button class="fab" data-act="visita" data-l="' + esc(l.id) + '">+ Visita</button>';
+  app.innerHTML = h;
+}
+
+/* ---------- formulário de lugar ---------- */
+function viewFormLugar(id){
+  var l = id ? lugarPorId(id) : null;
+  if (id && !l) return go("#/g/" + S.grupo.id);
+  S.form = {
+    id: id, categoria: l ? l.categoria : "restaurante", estado: l ? l.estado : "ja_fomos",
+    atributos: l ? (l.atributos||[]).slice() : []
+  };
+  var h = '<div class="top"><button class="iconbtn" data-act="voltar">‹</button><h1>' + (l ? "Editar lugar" : "Novo lugar") + '</h1></div><div class="stack">' +
+    '<div><label class="f" for="fNome">Nome</label><input type="text" id="fNome" maxlength="120" autocomplete="off" value="' + esc(l ? l.nome : "") + '"><div class="hint" id="fDup"></div></div>' +
+    '<div><label class="f">Categoria</label><div class="chips" id="gCategoria">' +
+      CATEGORIAS.map(function(c){ return '<button class="chip ' + (c[0] === S.form.categoria ? "on" : "") + '" data-act="fSingle" data-g="categoria" data-v="' + c[0] + '">' + c[1] + " " + esc(c[2]) + '</button>'; }).join("") + '</div></div>' +
+    '<div class="row"><div class="grow"><label class="f" for="fBairro">Bairro</label><input type="text" id="fBairro" value="' + esc(l ? l.bairro : "") + '"></div>' +
+      '<div class="grow"><label class="f" for="fCidade">Cidade</label><input type="text" id="fCidade" value="' + esc(l ? l.cidade : (lsGet("role_cidade") || "")) + '"></div></div>' +
+    '<div><label class="f" for="fMaps">Link do Google Maps (opcional)</label><input type="url" id="fMaps" placeholder="https://maps.app.goo.gl/…" value="' + esc(l ? l.maps_url : "") + '"></div>' +
+    '<div><label class="f">Situação</label><div class="chips" id="gEstado">' +
+      '<button class="chip ' + (S.form.estado === "ja_fomos" ? "on" : "") + '" data-act="fSingle" data-g="estado" data-v="ja_fomos">Já fomos</button>' +
+      '<button class="chip ' + (S.form.estado === "quero_ir" ? "on" : "") + '" data-act="fSingle" data-g="estado" data-v="quero_ir">Quero ir</button></div></div>' +
+    '<div><label class="f">Características</label><div class="chips" id="gAtributos">' +
+      ATRIBUTOS.map(function(a){ return '<button class="chip ' + (S.form.atributos.indexOf(a[0]) >= 0 ? "on" : "") + '" data-act="fMulti" data-v="' + a[0] + '">' + esc(a[1]) + '</button>'; }).join("") + '</div></div>' +
+    '<div class="err" id="fErr"></div>' +
+    '<button class="btn" id="fOk" data-act="salvarLugar">Salvar</button>' +
+    (l ? '<button class="btn danger" data-act="apagarLugar">Apagar lugar</button>' : '') + '</div>';
+  app.innerHTML = h;
+  $("fNome").addEventListener("input", checarDuplicado);
+}
+function checarDuplicado(){
+  var q = norm($("fNome").value), el = $("fDup");
+  if (q.length < 3){ el.textContent = ""; return; }
+  var achou = S.lugares.filter(function(l){
+    return l.id !== S.form.id && (norm(l.nome).indexOf(q) >= 0 || q.indexOf(norm(l.nome)) >= 0);
+  }).slice(0,3);
+  el.textContent = achou.length ? "Já existe no grupo: " + achou.map(function(l){ return l.nome; }).join(", ") : "";
+}
+function salvarLugar(){
+  var nome = $("fNome").value.trim();
+  if (!nome){ $("fErr").textContent = "O nome é obrigatório."; return; }
+  var maps = $("fMaps").value.trim();
+  if (maps && !/^https?:\/\//i.test(maps)){ $("fErr").textContent = "O link precisa começar com http:// ou https://"; return; }
+  var cidade = $("fCidade").value.trim();
+  var payload = {
+    nome: nome, categoria: S.form.categoria, estado: S.form.estado, atributos: S.form.atributos,
+    bairro: $("fBairro").value.trim() || null, cidade: cidade || null, maps_url: maps || null
+  };
+  if (cidade) lsSet("role_cidade", cidade);
+  $("fOk").disabled = true; $("fErr").textContent = "";
+  var op;
+  if (S.form.id) op = sb.from("lugares").update(payload).eq("id", S.form.id).select().single();
+  else { payload.grupo_id = S.grupo.id; op = sb.from("lugares").insert(payload).select().single(); }
+  op.then(function(r){
+    if (r.error){ $("fOk").disabled = false; $("fErr").textContent = traduzErro(r.error); return; }
+    var novo = !S.form.id, destino = r.data.id, jaFomos = payload.estado === "ja_fomos";
+    carregarGrupo(S.grupo.id).then(function(){
+      if (novo && jaFomos) go("#/g/" + S.grupo.id + "/visita/" + destino);
+      else go("#/g/" + S.grupo.id + "/lugar/" + destino);
+    });
+  });
+}
+function apagarLugar(){
+  var l = lugarPorId(S.form.id);
+  if (!confirm("Apagar \"" + l.nome + "\" e todas as visitas e avaliações? Isso não dá para desfazer.")) return;
+  sb.from("lugares").delete().eq("id", l.id).then(function(r){
+    if (r.error){ toast(traduzErro(r.error)); return; }
+    carregarGrupo(S.grupo.id).then(function(){ go("#/g/" + S.grupo.id); });
+  });
+}
+
+/* ---------- formulário de visita + avaliação ---------- */
+function viewFormVisita(lugarId, visitaId){
+  var l = lugarPorId(lugarId);
+  if (!l) return go("#/g/" + S.grupo.id);
+  var v = visitaId ? (l.visitas||[]).filter(function(x){ return x.id === visitaId; })[0] : null;
+  if (visitaId && !v) return go("#/g/" + S.grupo.id + "/lugar/" + lugarId);
+  var minha = v ? (v.avaliacoes||[]).filter(function(a){ return a.user_id === S.user.id; })[0] : null;
+  S.form = {
+    lugarId: lugarId, visitaId: visitaId,
+    cb: minha ? minha.custo_beneficio : null, voltaria: minha ? minha.voltaria : null
+  };
+  var nota = minha ? Number(minha.nota) : 8;
+  var h = '<div class="top"><button class="iconbtn" data-act="voltar">‹</button><h1>' + esc(l.nome) + '</h1></div><div class="stack">' +
+    '<div class="row"><div class="grow"><label class="f" for="vData">Data</label><input type="date" id="vData" max="' + hoje() + '" value="' + esc(v ? v.data : hoje()) + '"></div>' +
+      '<div class="grow"><label class="f" for="vPessoas">Pessoas</label><input type="number" id="vPessoas" min="1" max="99" inputmode="numeric" value="' + (v && v.num_pessoas ? v.num_pessoas : (S.membros.length || 2)) + '"></div></div>' +
+    '<div><label class="f" for="vGasto">Quanto gastaram no total (R$)</label><input type="number" id="vGasto" min="0" step="0.01" inputmode="decimal" placeholder="Opcional" value="' + (v && v.gasto_total != null ? v.gasto_total : "") + '"></div>' +
+    '<hr style="margin:2px 0"><h3>Sua avaliação</h3>' +
+    '<div class="notarow"><div class="score ' + notaClasse(nota) + '" id="notaBox">' + fmtNota(nota) + '</div>' +
+      '<div class="grow"><input type="range" id="vNota" min="0" max="10" step="0.5" value="' + nota + '"></div></div>' +
+    '<div><label class="f">Custo-benefício</label><div class="chips" id="gCb">' +
+      [1,2,3,4,5].map(function(n){ return '<button class="chip ' + (S.form.cb === n ? "on" : "") + '" data-act="fSingle" data-g="cb" data-v="' + n + '">' + n + ' · ' + esc(CB_LABEL[n]) + '</button>'; }).join("") + '</div></div>' +
+    '<div><label class="f">Voltaria?</label><div class="chips" id="gVoltaria">' +
+      VOLTARIA.map(function(x){ return '<button class="chip ' + (S.form.voltaria === x[0] ? "on" : "") + '" data-act="fSingle" data-g="voltaria" data-v="' + x[0] + '">' + esc(x[1]) + '</button>'; }).join("") + '</div></div>' +
+    '<div><label class="f" for="vPedidos">O que pediram</label><input type="text" id="vPedidos" maxlength="200" value="' + esc(minha ? minha.pedidos : "") + '"></div>' +
+    '<div><label class="f" for="vCom">Comentário</label><textarea id="vCom" maxlength="1000">' + esc(minha ? minha.comentario : "") + '</textarea></div>' +
+    '<div class="err" id="fErr"></div>' +
+    '<button class="btn" id="fOk" data-act="salvarVisita">Salvar</button>' +
+    (v ? '<button class="btn danger" data-act="apagarVisita">Apagar esta visita</button>' : '') + '</div>';
+  app.innerHTML = h;
+  $("vNota").addEventListener("input", function(e){
+    var n = Number(e.target.value), b = $("notaBox");
+    b.textContent = fmtNota(n); b.className = "score " + notaClasse(n);
+  });
+}
+function salvarVisita(){
+  var f = S.form, l = lugarPorId(f.lugarId);
+  var data = $("vData").value, gasto = $("vGasto").value, pessoas = $("vPessoas").value;
+  if (!data){ $("fErr").textContent = "Escolha a data."; return; }
+  var vis = {
+    data: data,
+    gasto_total: gasto === "" ? null : Number(gasto),
+    num_pessoas: pessoas === "" ? null : parseInt(pessoas, 10)
+  };
+  var av = {
+    nota: Number($("vNota").value), custo_beneficio: f.cb || null, voltaria: f.voltaria || null,
+    pedidos: $("vPedidos").value.trim() || null, comentario: $("vCom").value.trim() || null
+  };
+  $("fOk").disabled = true; $("fErr").textContent = "";
+  var pVisita = f.visitaId
+    ? sb.from("visitas").update(vis).eq("id", f.visitaId).select().single()
+    : sb.from("visitas").insert(Object.assign({ lugar_id: f.lugarId }, vis)).select().single();
+  pVisita.then(function(r){
+    if (r.error) throw r.error;
+    av.visita_id = r.data.id; av.user_id = S.user.id;
+    return sb.from("avaliacoes").upsert(av, { onConflict: "visita_id,user_id" });
+  }).then(function(r){
+    if (r.error) throw r.error;
+    return l.estado === "ja_fomos" ? null : sb.from("lugares").update({ estado: "ja_fomos" }).eq("id", f.lugarId);
+  }).then(function(){
+    return carregarGrupo(S.grupo.id);
+  }).then(function(){
+    S.aba = "ja_fomos";
+    go("#/g/" + S.grupo.id + "/lugar/" + f.lugarId);
+  }).catch(function(e){
+    $("fOk").disabled = false; $("fErr").textContent = traduzErro(e);
+  });
+}
+function apagarVisita(){
+  if (!confirm("Apagar esta visita e as avaliações dela?")) return;
+  var lid = S.form.lugarId;
+  sb.from("visitas").delete().eq("id", S.form.visitaId).then(function(r){
+    if (r.error){ toast(traduzErro(r.error)); return; }
+    carregarGrupo(S.grupo.id).then(function(){ go("#/g/" + S.grupo.id + "/lugar/" + lid); });
+  });
+}
+
+/* ---------- ações (delegação de eventos) ---------- */
+function marcar(container, btn, multi){
+  if (multi) btn.classList.toggle("on");
+  else {
+    Array.prototype.forEach.call(container.children, function(c){ c.classList.remove("on"); });
+    btn.classList.add("on");
+  }
+}
+document.addEventListener("click", function(e){
+  var el = e.target.closest("[data-act]");
+  if (!el) return;
+  var a = el.getAttribute("data-act"), d = el.dataset, g = S.grupo && S.grupo.id;
+  switch (a){
+    case "auth": return fazerAuth();
+    case "authModo": S.authModo = S.authModo === "login" ? "cadastro" : "login"; return viewAuth();
+    case "sair": return sb.auth.signOut();
+    case "abrirGrupo": return go("#/g/" + d.id);
+    case "irGrupos": S._grupoAuto = true; S.grupo = null; return go("#/grupos");
+    case "sheetCriar": return sheetCriar();
+    case "sheetEntrar": return sheetEntrar();
+    case "gTipo": S.sheetTipo = d.v; return marcar($("gTipo"), el, false);
+    case "criarGrupo": return criarGrupo();
+    case "entrarGrupo":
+      var cod = $("gCod").value.trim();
+      if (!cod){ $("gErr").textContent = "Digite o código."; return; }
+      $("gOk").disabled = true; return entrarGrupo(cod, false);
+    case "convidar": return convidar();
+    case "copiarConvite":
+      if (navigator.clipboard) navigator.clipboard.writeText(S.convite.texto).then(function(){ toast("Convite copiado"); });
+      return;
+    case "aba": S.aba = d.v; S.cat = ""; return viewLista();
+    case "cat": S.cat = d.v; return renderCards();
+    case "novoLugar": return go("#/g/" + g + "/novo");
+    case "abrirLugar": return go("#/g/" + g + "/lugar/" + d.id);
+    case "editarLugar": return go("#/g/" + g + "/editar/" + d.id);
+    case "voltarLista": return go("#/g/" + g);
+    case "voltar": return history.back();
+    case "visita": return go("#/g/" + g + "/visita/" + d.l + (d.v ? "/" + d.v : ""));
+    case "fSingle":
+      var v = d.v, key = d.g;
+      S.form[key] = (key === "cb") ? parseInt(v, 10) : v;
+      return marcar(el.parentNode, el, false);
+    case "fMulti":
+      var i = S.form.atributos.indexOf(d.v);
+      if (i >= 0) S.form.atributos.splice(i, 1); else S.form.atributos.push(d.v);
+      return marcar(el.parentNode, el, true);
+    case "salvarLugar": return salvarLugar();
+    case "apagarLugar": return apagarLugar();
+    case "salvarVisita": return salvarVisita();
+    case "apagarVisita": return apagarVisita();
+  }
+});
+
+/* ---------- convite por link (?codigo=XXXXXX) ---------- */
+(function(){
+  try {
+    var c = new URLSearchParams(location.search).get("codigo");
+    if (c && /^[A-Za-z0-9]{4,12}$/.test(c)){
+      lsSet("role_convite", c.toUpperCase());
+      history.replaceState(null, "", location.pathname + location.hash);
+    }
+  } catch(e){}
+})();
+
+/* ---------- sessão ---------- */
+function iniciar(user){
+  S.user = user; S.grupo = null; S._grupoAuto = false;
+  var conv = lsGet("role_convite");
+  var p = carregarGrupos();
+  if (conv){
+    lsSet("role_convite", null);
+    p = p.then(function(){ return entrarGrupo(conv, true); }).then(function(){ return carregarGrupos(); });
+  }
+  p.then(function(){
+    return sb.from("perfis").select("id,nome").eq("id", user.id).then(function(r){
+      if (r.data) r.data.forEach(function(x){ S.perfis[x.id] = x; });
+    });
+  }).then(function(){
+    if (!location.hash || location.hash === "#/" || location.hash === "#"){
+      var ultimo = lsGet("role_grupo");
+      if (ultimo && S.grupos.some(function(g){ return g.id === ultimo; })) location.hash = "#/g/" + ultimo;
+      else if (S.grupos.length === 1) location.hash = "#/g/" + S.grupos[0].id;
+      else route();
+    } else route();
+  }).catch(function(e){ app.innerHTML = '<p class="empty">Erro ao carregar: ' + esc(traduzErro(e)) + '</p>'; });
+}
+sb.auth.onAuthStateChange(function(evento, session){
+  setTimeout(function(){
+    if (session && session.user){
+      if (!S.user || S.user.id !== session.user.id) iniciar(session.user);
+    } else {
+      S.user = null; S.grupo = null; S.grupos = []; S.lugares = [];
+      location.hash = ""; viewAuth();
+    }
+  }, 0);
+});
+sb.auth.getSession().then(function(r){ if (!r.data.session) viewAuth(); });
+
+})();
+</script>
+</body>
+</html>

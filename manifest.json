@@ -1,0 +1,14 @@
+{
+  "name": "Rolê",
+  "short_name": "Rolê",
+  "description": "Avalie lugares com seu casal ou grupo de amigos.",
+  "lang": "pt-BR",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#FAF6F1",
+  "theme_color": "#D9552B",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
