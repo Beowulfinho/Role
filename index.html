@@ -168,6 +168,8 @@
   .avatar.click{cursor:pointer}
   .linkbtn{border:0;background:none;color:var(--accent);font-weight:600;padding:0;font-size:inherit;text-decoration:underline}
   .chip.fixo{opacity:.92}
+  .foto .autor{position:absolute;left:5px;bottom:5px;background:rgba(0,0,0,.6);color:#fff;font-size:11px;font-weight:600;padding:1px 7px;border-radius:9px;max-width:80%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .foto img[data-act]{cursor:pointer}
   .rev{border-top:1px solid var(--line);padding-top:10px;margin-top:10px}
   .rev:first-child{border-top:0;padding-top:0;margin-top:0}
 </style>
@@ -336,7 +338,7 @@ function route(){
       if (sub === "novo") return viewFormLugar(null);
       if (sub === "editar" && p[3]) return viewFormLugar(p[3]);
       if (sub === "visita" && p[3]) return viewFormVisita(p[3], p[4] || null);
-      if (sub === "role" && p[3] && p[4]) return viewRole(p[3], p[4]);
+      if (sub === "role" && p[3] && p[4]){ S.fotoFiltro = ""; return viewRole(p[3], p[4]); }
       if (sub === "avaliar" && p[3] && p[4]) return viewFormAvaliacao(p[3], p[4]);
       viewLista();
     }).catch(function(e){ toast(traduzErro(e)); go("#/grupos"); });
@@ -1545,11 +1547,12 @@ function stripFotos(v){
     return '<img data-path="' + esc(pathThumb(ft.caminho)) + '" data-act="abrirFoto" data-v="' + esc(v.id) + '" data-i="' + i + '" alt="">';
   }).join("") + '</div>';
 }
-function abrirFoto(visitaId, idx){
+function abrirFoto(visitaId, idx, uid){
   var v = null;
   S.lugares.forEach(function(l){ (l.visitas || []).forEach(function(x){ if (x.id === visitaId) v = x; }); });
   if (!v || !(v.fotos || []).length) return;
-  S.lb = { caminhos: ordenarFotos(v).map(function(x){ return x.caminho; }), i: idx };
+  var fs = ordenarFotos(v); if (uid) fs = fs.filter(function(x){ return x.criado_por === uid; });
+  S.lb = { caminhos: fs.map(function(x){ return x.caminho; }), autores: fs.map(function(x){ return x.criado_por; }), i: idx };
   var bg = document.createElement("div"); bg.className = "lb"; bg.id = "lb";
   bg.innerHTML = '<img id="lbImg" alt=""><button class="lbx" data-act="fotoFechar" aria-label="Fechar">×</button>' +
     (S.lb.caminhos.length > 1 ? '<button class="lbn lbp" data-act="fotoPrev" aria-label="Anterior">‹</button><button class="lbn lbq" data-act="fotoNext" aria-label="Próxima">›</button>' : '') +
@@ -1561,7 +1564,7 @@ function abrirFoto(visitaId, idx){
 function mostrarFoto(){
   var lb = S.lb; if (!lb || !$("lbImg")) return;
   var c = lb.caminhos[lb.i];
-  $("lbCont").textContent = (lb.i + 1) + " / " + lb.caminhos.length;
+  $("lbCont").textContent = (lb.i + 1) + " / " + lb.caminhos.length + (lb.autores && lb.autores[lb.i] ? " · Foto de " + nomeDe(lb.autores[lb.i]) : "");
   urlsAssinadas([c]).then(function(m){ if (S.lb === lb && m[c] && $("lbImg")) $("lbImg").src = m[c]; }).catch(function(){});
 }
 function fecharFoto(){ var b = $("lb"); if (b) b.remove(); S.lb = null; }
@@ -1618,6 +1621,34 @@ function sincronizarFotos(f, visitaId, btn){
 }
 
 /* ---------- rolê: calificación individual, pantalla del rolê y pendientes ---------- */
+function primeiroNome(n){ return String(n || "").trim().split(/\s+/)[0] || "Alguém"; }
+function htmlGaleria(l, v, souPart){
+  var fotos = ordenarFotos(v), autores = [];
+  fotos.forEach(function(f){ if (autores.indexOf(f.criado_por) < 0) autores.push(f.criado_por); });
+  var filtro = autores.indexOf(S.fotoFiltro) >= 0 ? S.fotoFiltro : "";
+  var lista = filtro ? fotos.filter(function(f){ return f.criado_por === filtro; }) : fotos;
+  var h = '<div class="row" style="margin:16px 0 8px"><h3 class="grow">📷 Fotos do rolê' + (fotos.length ? ' (' + fotos.length + ')' : '') + '</h3>' +
+    (souPart ? '<button class="btn sec small" data-act="avaliar" data-l="' + esc(l.id) + '" data-v="' + esc(v.id) + '">+ Minhas fotos</button>' : '') + '</div>';
+  if (!fotos.length) return h + '<div class="faint" style="margin-bottom:8px">Ainda não há fotos. Cada participante adiciona as suas em "Minha avaliação".</div>';
+  if (autores.length > 1){
+    h += '<div class="chips" style="margin-bottom:10px"><button class="chip ' + (!filtro ? "on" : "") + '" data-act="fotoFiltro" data-u="">Todas</button>' +
+      autores.map(function(a){
+        var n = fotos.filter(function(f){ return f.criado_por === a; }).length;
+        return '<button class="chip ' + (filtro === a ? "on" : "") + '" data-act="fotoFiltro" data-u="' + esc(a) + '">' +
+          esc(primeiroNome(nomeDe(a))) + (a === S.user.id ? " (você)" : "") + ' · ' + n + '</button>';
+      }).join("") + '</div>';
+  }
+  return h + '<div class="fotos-grid">' + lista.map(function(f, i){
+    return '<div class="foto"><img data-path="' + esc(pathThumb(f.caminho)) + '" data-act="abrirFoto" data-v="' + esc(v.id) + '" data-i="' + i + '" data-u="' + esc(filtro) + '" alt="">' +
+      '<span class="autor">' + esc(primeiroNome(nomeDe(f.criado_por))) + '</span></div>';
+  }).join("") + '</div>';
+}
+function htmlMinhasFotos(){
+  return '<div><label class="f">Minhas fotos do rolê</label><div class="fotos-grid" id="fotosBox"></div>' +
+    '<input type="file" id="fFotos" accept="image/*" multiple hidden>' +
+    '<button type="button" class="btn sec" style="margin-top:8px" data-act="addFotos">📷 Adicionar fotos</button>' +
+    '<div class="faint" style="margin-top:6px">As fotos que você tirar ficam no seu registro e também na galeria do rolê, que reúne as de todos.</div></div>';
+}
 function mediaVisita(v){ return avg((v.avaliacoes || []).map(function(a){ return Number(a.nota); })); }
 function htmlAvaliacao(minha){
   var nota = minha ? Number(minha.nota) : 8, f = S.form;
@@ -1650,6 +1681,7 @@ function viewRole(lugarId, visitaId){
   if (!v) return go("#/g/" + S.grupo.id + "/lugar/" + lugarId);
   var eu = S.user.id, avs = v.avaliacoes || [], parts = (v.visita_participantes || []).map(function(x){ return x.user_id; });
   var criador = v.criado_por, souCriador = criador === eu, souPart = parts.indexOf(eu) >= 0;
+  S.roleAtual = { l: lugarId, v: visitaId };
   var minha = avs.filter(function(a){ return a.user_id === eu; })[0], media = mediaVisita(v);
   var ordem = parts.slice().sort(function(a, b){
     if (a === criador) return -1;
@@ -1665,7 +1697,7 @@ function viewRole(lugarId, visitaId){
       '<div class="faint">Rolê criado por ' + esc(nomeDe(criador)) + (souCriador ? " (você)" : "") + '</div></div>' +
     '<div class="card"><div class="row"><div class="score ' + notaClasse(media) + '">' + fmtNota(media) + '</div>' +
       '<div class="grow"><div class="title">Nota média do rolê</div><div class="faint">' + avs.length + ' de ' + parts.length + (parts.length === 1 ? " avaliou" : " avaliaram") + '</div></div></div></div>' +
-    stripFotos(v);
+    htmlGaleria(l, v, souPart);
   if (souPart){
     h += '<button class="btn" style="margin:4px 0 6px" data-act="avaliar" data-l="' + esc(l.id) + '" data-v="' + esc(v.id) + '">' +
       (minha ? "Editar minha avaliação" : "⭐ Avaliar este rolê") + '</button>';
@@ -1702,25 +1734,31 @@ function viewFormAvaliacao(lugarId, visitaId){
   var souPart = (v.visita_participantes || []).some(function(x){ return x.user_id === S.user.id; });
   if (!souPart){ toast("Só quem foi ao rolê pode avaliar."); return go("#/g/" + S.grupo.id + "/role/" + lugarId + "/" + visitaId); }
   var minha = (v.avaliacoes || []).filter(function(a){ return a.user_id === S.user.id; })[0];
-  S.form = { modo: "avaliar", lugarId: lugarId, visitaId: visitaId, cb: minha ? minha.custo_beneficio : null, voltaria: minha ? minha.voltaria : null };
+  S.form = { modo: "avaliar", lugarId: lugarId, visitaId: visitaId, cb: minha ? minha.custo_beneficio : null, voltaria: minha ? minha.voltaria : null,
+    fotosExist: ordenarFotos(v).filter(function(x){ return x.criado_por === S.user.id; }), fotosNovas: [], fotosRemover: [] };
   var quem = (v.visita_participantes || []).map(function(x){ return nomeDe(x.user_id); }).join(", ");
   app.innerHTML = '<div class="top"><button class="iconbtn" data-act="voltar">‹</button><h1>Minha avaliação</h1></div><div class="stack">' +
     '<div class="card" style="margin:0"><div class="title">' + esc(l.nome) + '</div><div class="muted">📅 ' + esc(fmtData(v.data)) + '</div>' +
       (quem ? '<div class="faint">👥 ' + esc(quem) + '</div>' : '') + '</div>' +
-    htmlAvaliacao(minha) +
+    htmlAvaliacao(minha) + htmlMinhasFotos() +
     '<div class="faint">Cada pessoa dá a sua nota. No grupo aparece a média do rolê, e dentro do rolê todos veem como cada um avaliou.</div>' +
     '<div class="err" id="fErr"></div><button class="btn" id="fOk" data-act="salvarAvaliacao">Salvar avaliação</button></div>';
   bindNota();
+  $("fFotos").addEventListener("change", function(e){ adicionarFotos(e.target.files); e.target.value = ""; });
+  renderFotosForm();
 }
 function salvarAvaliacao(){
   var f = S.form, av = lerAvaliacao(f);
   av.visita_id = f.visitaId; av.user_id = S.user.id;
-  var btn = $("fOk"); btn.disabled = true; btn.textContent = "Salvando…"; $("fErr").textContent = "";
+  var btn = $("fOk"), falhas = 0; btn.disabled = true; btn.textContent = "Salvando…"; $("fErr").textContent = "";
   sb.from("avaliacoes").upsert(av, { onConflict: "visita_id,user_id" }).then(function(r){
     if (r.error) throw r.error;
+    return sincronizarFotos(f, f.visitaId, btn);
+  }).then(function(n){
+    falhas = n;
     return carregarGrupo(S.grupo.id);
   }).then(function(){
-    toast("Avaliação salva.");
+    toast(falhas ? (falhas === 1 ? "Avaliação salva, mas uma foto não foi enviada." : "Avaliação salva, mas " + falhas + " fotos não foram enviadas.") : "Avaliação salva.");
     go("#/g/" + S.grupo.id + "/role/" + f.lugarId + "/" + f.visitaId);
   }).catch(function(e){
     btn.disabled = false; btn.textContent = "Salvar avaliação"; $("fErr").textContent = traduzErro(e);
@@ -1759,7 +1797,7 @@ function viewFormVisita(lugarId, visitaId){
     participantes: v ? (v.visita_participantes || []).map(function(x){ return x.user_id; }) : [S.user.id],
     pessoasManual: !!v,
     delivery: v ? !!v.delivery : false,
-    fotosExist: v ? ordenarFotos(v) : [], fotosNovas: [], fotosRemover: []
+    fotosExist: v ? ordenarFotos(v).filter(function(x){ return x.criado_por === S.user.id; }) : [], fotosNovas: [], fotosRemover: []
   };
   if (S.form.participantes.indexOf(S.form.criadorId) < 0) S.form.participantes.push(S.form.criadorId);
   var nota = minha ? Number(minha.nota) : 8;
@@ -1775,7 +1813,7 @@ function viewFormVisita(lugarId, visitaId){
       '<button type="button" class="chip ' + (!S.form.delivery ? "on" : "") + '" data-act="fSingle" data-g="delivery" data-v="false">🍽️ Presencial</button>' +
       '<button type="button" class="chip ' + (S.form.delivery ? "on" : "") + '" data-act="fSingle" data-g="delivery" data-v="true">🛵 Delivery</button></div></div>' +
     '<div><label class="f" for="vGasto">Quanto gastaram no total (R$)</label><input type="number" id="vGasto" min="0" step="0.01" inputmode="decimal" placeholder="Opcional" value="' + (v && v.gasto_total != null ? v.gasto_total : "") + '"></div>' +
-    '<div><label class="f">Fotos</label><div class="fotos-grid" id="fotosBox"></div>' +
+    '<div><label class="f">Minhas fotos</label><div class="fotos-grid" id="fotosBox"></div>' +
       '<input type="file" id="fFotos" accept="image/*" multiple hidden>' +
       '<button type="button" class="btn sec" style="margin-top:8px" data-act="addFotos">📷 Adicionar fotos</button></div>' +
     (v ? '' : htmlAvaliacao(null)) +
@@ -1919,6 +1957,7 @@ document.addEventListener("click", function(e){
       if (i >= 0) S.form.atributos.splice(i, 1); else S.form.atributos.push(d.v);
       return marcar(el.parentNode, el, true);
     case "usarLoc": return usarLocalizacao();
+    case "fotoFiltro": S.fotoFiltro = d.u || ""; return S.roleAtual && viewRole(S.roleAtual.l, S.roleAtual.v);
     case "abrirRole": return go("#/g/" + g + "/role/" + d.l + "/" + d.v);
     case "avaliar": return go("#/g/" + g + "/avaliar/" + d.l + "/" + d.v);
     case "salvarAvaliacao": return salvarAvaliacao();
@@ -1945,7 +1984,7 @@ document.addEventListener("click", function(e){
         S.form.fotosRemover.push(x); return false;
       });
       return renderFotosForm();
-    case "abrirFoto": return abrirFoto(d.v, parseInt(d.i, 10));
+    case "abrirFoto": return abrirFoto(d.v, parseInt(d.i, 10), d.u);
     case "fotoFechar": return fecharFoto();
     case "fotoPrev": S.lb.i = (S.lb.i + S.lb.caminhos.length - 1) % S.lb.caminhos.length; return mostrarFoto();
     case "fotoNext": S.lb.i = (S.lb.i + 1) % S.lb.caminhos.length; return mostrarFoto();
