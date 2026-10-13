@@ -610,9 +610,12 @@ function geocodeReverso(lat, lng){
 }
 function geocodeEndereco(endereco, cidade){
   var q = [endereco, cidade].filter(Boolean).join(", ");
-  return fetchComTimeout("https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&accept-language=pt-BR&q=" + encodeURIComponent(q), 7000)
+  return fetchComTimeout("https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&addressdetails=1&accept-language=pt-BR&q=" + encodeURIComponent(q), 7000)
     .then(function(r){ return r.json(); }).then(function(a){
-      return (a && a[0]) ? { lat: parseFloat(a[0].lat), lng: parseFloat(a[0].lon) } : null;
+      if (!a || !a[0]) return null;
+      var ad = a[0].address || {};
+      return { lat: parseFloat(a[0].lat), lng: parseFloat(a[0].lon),
+        cidade: ad.city || ad.town || ad.village || ad.municipality || ad.county || "" };
     }).catch(function(){ return null; });
 }
 function distM(lat1, lng1, lat2, lng2){
@@ -638,7 +641,11 @@ function geocodificarForm(){
   var hint = $("mapHint"); if (hint) hint.textContent = "Procurando no mapa…";
   return geocodeEndereco(q, cidade).then(function(g){
     if (S.form !== f) return;
-    if (!g){ if (hint) hint.textContent = "Não achei esse endereço no mapa. Arraste o pin até o lugar certo."; return; }
+    if (g && g.cidade){
+      var a = norm(g.cidade), b = norm(cidade);
+      if (a !== b && a.indexOf(b) < 0 && b.indexOf(a) < 0) g = null;
+    }
+    if (!g){ if (hint) hint.textContent = "Não achei esse endereço em " + cidade + ". Confira a grafia da rua ou arraste o pin até o lugar certo."; return; }
     if (hint) hint.textContent = "Confira o pin e arraste se precisar ajustar.";
     if (f.precisao === "gps" && f.lat != null && distM(f.lat, f.lng, g.lat, g.lng) <= 300) return;
     if (S.map) colocarPin(g.lat, g.lng, "endereco"); else { f.lat = g.lat; f.lng = g.lng; f.precisao = "endereco"; }
