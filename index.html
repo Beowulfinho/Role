@@ -13,6 +13,8 @@
 <link rel="apple-touch-icon" href="icon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Inter:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <style>
   :root{
@@ -93,6 +95,8 @@
   a{color:var(--accent)}
   hr{border:0;border-top:1px solid var(--line);margin:14px 0}
   .brand{font-family:"Bricolage Grotesque",sans-serif;font-size:44px;font-weight:700;color:var(--accent);text-align:center;margin:44px 0 4px}
+  .map{height:260px;border-radius:14px;border:1px solid var(--line);z-index:0}
+  .pin{background:none;border:0;font-size:28px;line-height:30px}
   .rev{border-top:1px solid var(--line);padding-top:10px;margin-top:10px}
   .rev:first-child{border-top:0;padding-top:0;margin-top:0}
 </style>
@@ -165,6 +169,7 @@ function traduzErro(e){
 }
 function mapsUrl(l){
   if (l.maps_url && /^https?:\/\//i.test(l.maps_url)) return l.maps_url;
+  if (l.lat != null && l.lng != null) return "https://www.google.com/maps/search/?api=1&query=" + l.lat + "," + l.lng;
   var q = [l.nome, l.bairro, l.cidade].filter(Boolean).join(" ");
   return "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(q);
 }
@@ -203,12 +208,17 @@ function carregarGrupo(id){
   if (!g) return Promise.reject(new Error("Grupo não encontrado"));
   S.grupo = g;
   return Promise.all([
-    sb.from("lugares").select("*, visitas(*, avaliacoes(*))").eq("grupo_id", id).order("created_at",{ascending:false}),
+    sb.from("lugares").select("*, locais(*), visitas(*, avaliacoes(*))").eq("grupo_id", id).order("created_at",{ascending:false}),
     sb.from("grupo_membros").select("user_id,papel").eq("grupo_id", id),
     sb.from("perfis").select("id,nome")
   ]).then(function(rs){
     rs.forEach(function(r){ if (r.error) throw r.error; });
-    S.lugares = rs[0].data || [];
+    S.lugares = (rs[0].data || []).map(function(l){
+      var lo = l.locais || {};
+      l.nome = lo.nome; l.categoria = lo.categoria; l.bairro = lo.bairro; l.cidade = lo.cidade;
+      l.lat = lo.lat; l.lng = lo.lng; l.precisao = lo.precisao; l.local_criado_por = lo.criado_por;
+      return l;
+    });
     S.membros = rs[1].data || [];
     S.perfis = {}; (rs[2].data||[]).forEach(function(p){ S.perfis[p.id] = p; });
   });
@@ -444,67 +454,225 @@ function viewLugar(id){
   app.innerHTML = h;
 }
 
-/* ---------- formulário de lugar ---------- */
+/* ---------- formulário de lugar (catálogo comunitário) ---------- */
+var GEO = { lat: null, lng: null, estado: "idle" };
+var buscaSeq = 0, buscaTimer = null;
+
+function pedirLocalizacao(depois){
+  if (!navigator.geolocation){ GEO.estado = "negado"; atualizarStatusLoc(); if (depois) depois(); return; }
+  GEO.estado = "buscando"; atualizarStatusLoc();
+  navigator.geolocation.getCurrentPosition(function(p){
+    GEO.lat = p.coords.latitude; GEO.lng = p.coords.longitude; GEO.estado = "ok";
+    lsSet("role_ultimo", JSON.stringify([GEO.lat, GEO.lng]));
+    atualizarStatusLoc(); if (depois) depois();
+  }, function(){
+    GEO.estado = "negado"; atualizarStatusLoc(); if (depois) depois();
+  }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 });
+}
+function atualizarStatusLoc(){
+  var el = $("locStatus"); if (!el) return;
+  el.textContent = GEO.estado === "ok" ? "📍 Usando sua localização atual"
+    : GEO.estado === "buscando" ? "Localizando…"
+    : GEO.estado === "negado" ? "Sem localização. Busque pelo nome." : "";
+}
+
 function viewFormLugar(id){
   var l = id ? lugarPorId(id) : null;
   if (id && !l) return go("#/g/" + S.grupo.id);
-  S.form = {
-    id: id, categoria: l ? l.categoria : "restaurante", estado: l ? l.estado : "ja_fomos",
-    atributos: l ? (l.atributos||[]).slice() : []
-  };
-  var h = '<div class="top"><button class="iconbtn" data-act="voltar">‹</button><h1>' + (l ? "Editar lugar" : "Novo lugar") + '</h1></div><div class="stack">' +
-    '<div><label class="f" for="fNome">Nome</label><input type="text" id="fNome" maxlength="120" autocomplete="off" value="' + esc(l ? l.nome : "") + '"><div class="hint" id="fDup"></div></div>' +
-    '<div><label class="f">Categoria</label><div class="chips" id="gCategoria">' +
-      CATEGORIAS.map(function(c){ return '<button class="chip ' + (c[0] === S.form.categoria ? "on" : "") + '" data-act="fSingle" data-g="categoria" data-v="' + c[0] + '">' + c[1] + " " + esc(c[2]) + '</button>'; }).join("") + '</div></div>' +
-    '<div class="row"><div class="grow"><label class="f" for="fBairro">Bairro</label><input type="text" id="fBairro" value="' + esc(l ? l.bairro : "") + '"></div>' +
-      '<div class="grow"><label class="f" for="fCidade">Cidade</label><input type="text" id="fCidade" value="' + esc(l ? l.cidade : (lsGet("role_cidade") || "")) + '"></div></div>' +
-    '<div><label class="f" for="fMaps">Link do Google Maps (opcional)</label><input type="url" id="fMaps" placeholder="https://maps.app.goo.gl/…" value="' + esc(l ? l.maps_url : "") + '"></div>' +
-    '<div><label class="f">Situação</label><div class="chips" id="gEstado">' +
-      '<button class="chip ' + (S.form.estado === "ja_fomos" ? "on" : "") + '" data-act="fSingle" data-g="estado" data-v="ja_fomos">Já fomos</button>' +
-      '<button class="chip ' + (S.form.estado === "quero_ir" ? "on" : "") + '" data-act="fSingle" data-g="estado" data-v="quero_ir">Quero ir</button></div></div>' +
-    '<div><label class="f">Características</label><div class="chips" id="gAtributos">' +
-      ATRIBUTOS.map(function(a){ return '<button class="chip ' + (S.form.atributos.indexOf(a[0]) >= 0 ? "on" : "") + '" data-act="fMulti" data-v="' + a[0] + '">' + esc(a[1]) + '</button>'; }).join("") + '</div></div>' +
+  if (l){
+    S.form = { modo: "editar", id: id, localId: l.local_id, nome: l.nome, categoria: l.categoria, bairro: l.bairro || "",
+      cidade: l.cidade || "", lat: l.lat, lng: l.lng, precisao: l.precisao, estado: l.estado,
+      atributos: (l.atributos || []).slice(), maps: l.maps_url || "", editavelLocal: l.local_criado_por === S.user.id };
+  } else {
+    S.form = { modo: "busca", nome: "", categoria: "restaurante", bairro: "", cidade: lsGet("role_cidade") || "",
+      lat: null, lng: null, precisao: "desconhecida", estado: "ja_fomos", atributos: [], maps: "", sugs: [] };
+  }
+  renderForm();
+  if (!l) pedirLocalizacao(function(){ buscarLocais(); });
+}
+
+function resumoLocal(x){
+  var c = CAT[x.categoria] || CAT.outro;
+  return [c[1] + " " + c[2], x.bairro, x.cidade].filter(Boolean).map(esc).join(" · ");
+}
+function htmlCamposGrupo(f){
+  return '<div><label class="f">Situação</label><div class="chips">' +
+      '<button class="chip ' + (f.estado === "ja_fomos" ? "on" : "") + '" data-act="fSingle" data-g="estado" data-v="ja_fomos">Já fomos</button>' +
+      '<button class="chip ' + (f.estado === "quero_ir" ? "on" : "") + '" data-act="fSingle" data-g="estado" data-v="quero_ir">Quero ir</button></div></div>' +
+    '<div><label class="f">Características</label><div class="chips">' +
+      ATRIBUTOS.map(function(a){ return '<button class="chip ' + (f.atributos.indexOf(a[0]) >= 0 ? "on" : "") + '" data-act="fMulti" data-v="' + a[0] + '">' + esc(a[1]) + '</button>'; }).join("") + '</div></div>' +
+    '<div><label class="f" for="fMaps">Link do Google Maps (opcional)</label><input type="url" id="fMaps" placeholder="https://maps.app.goo.gl/…" value="' + esc(f.maps) + '"></div>' +
     '<div class="err" id="fErr"></div>' +
-    '<button class="btn" id="fOk" data-act="salvarLugar">Salvar</button>' +
-    (l ? '<button class="btn danger" data-act="apagarLugar">Apagar lugar</button>' : '') + '</div>';
+    '<button class="btn" id="fOk" data-act="salvarLugar">Salvar</button>';
+}
+function htmlCamposLocal(f){
+  return '<div><label class="f" for="fNome">Nome</label><input type="text" id="fNome" maxlength="120" autocomplete="off" value="' + esc(f.nome) + '"></div>' +
+    '<div><label class="f">Categoria</label><div class="chips">' +
+      CATEGORIAS.map(function(c){ return '<button class="chip ' + (c[0] === f.categoria ? "on" : "") + '" data-act="fSingle" data-g="categoria" data-v="' + c[0] + '">' + c[1] + " " + esc(c[2]) + '</button>'; }).join("") + '</div></div>' +
+    '<div class="row"><div class="grow"><label class="f" for="fBairro">Bairro</label><input type="text" id="fBairro" value="' + esc(f.bairro) + '"></div>' +
+      '<div class="grow"><label class="f" for="fCidade">Cidade</label><input type="text" id="fCidade" value="' + esc(f.cidade) + '"></div></div>' +
+    '<div><label class="f">Localização</label><div id="mapa" class="map"></div>' +
+      '<div class="row" style="margin-top:8px"><span class="faint grow" id="mapStatus"></span><button class="btn sec small" data-act="usarLoc">📍 Minha localização</button></div>' +
+      '<div class="faint">Toque no mapa ou arraste o pin até o lugar certo.</div></div>';
+}
+function renderForm(){
+  var f = S.form;
+  if (S.map){ S.map.remove(); S.map = null; S.pin = null; }
+  var h = '<div class="top"><button class="iconbtn" data-act="' + (f.modo === "existente" || f.modo === "novo" ? "voltaBusca" : "voltar") + '">‹</button><h1>' +
+    (f.modo === "editar" ? "Editar lugar" : "Novo lugar") + '</h1></div><div class="stack">';
+  if (f.modo === "busca"){
+    h += '<p class="muted" style="margin:0">Escreva o nome. Se já estiver no catálogo, escolha o lugar para não duplicar.</p>' +
+      '<input type="text" id="fNome" maxlength="120" autocomplete="off" placeholder="Nome do lugar" value="' + esc(f.nome) + '">' +
+      '<div class="row"><span class="faint grow" id="locStatus"></span><button class="btn sec small" data-act="usarLoc">📍 Minha localização</button></div>' +
+      '<div id="sugs"></div>' +
+      '<button class="btn sec" data-act="novoLocal">Não achei, cadastrar novo lugar</button>';
+  } else if (f.modo === "existente"){
+    h += '<div class="card"><div class="title">' + esc(f.local.nome) + '</div><div class="muted">' + resumoLocal(f.local) + '</div></div>' + htmlCamposGrupo(f);
+  } else if (f.modo === "novo" || (f.modo === "editar" && f.editavelLocal)){
+    h += htmlCamposLocal(f) + htmlCamposGrupo(f);
+  } else {
+    h += '<div class="card"><div class="title">' + esc(f.nome) + '</div><div class="muted">' + resumoLocal(f) + '</div>' +
+      '<div class="faint" style="margin-top:6px">Nome e localização só podem ser mudados por quem cadastrou o lugar, e só enquanto nenhum outro grupo o usa.</div></div>' + htmlCamposGrupo(f);
+  }
+  if (f.modo === "editar") h += '<button class="btn danger" data-act="apagarLugar">Remover do grupo</button>';
+  h += '</div>';
   app.innerHTML = h;
-  $("fNome").addEventListener("input", checarDuplicado);
+  if (f.modo === "busca"){
+    $("fNome").addEventListener("input", function(){ clearTimeout(buscaTimer); buscaTimer = setTimeout(buscarLocais, 300); });
+    atualizarStatusLoc(); renderSugs();
+  }
+  if ($("mapa")) montarMapa();
 }
-function checarDuplicado(){
-  var q = norm($("fNome").value), el = $("fDup");
-  if (q.length < 3){ el.textContent = ""; return; }
-  var achou = S.lugares.filter(function(l){
-    return l.id !== S.form.id && (norm(l.nome).indexOf(q) >= 0 || q.indexOf(norm(l.nome)) >= 0);
-  }).slice(0,3);
-  el.textContent = achou.length ? "Já existe no grupo: " + achou.map(function(l){ return l.nome; }).join(", ") : "";
+
+/* busca no catálogo: perto de mim + nome parecido */
+function buscarLocais(){
+  var f = S.form; if (!f || f.modo !== "busca" || !$("fNome")) return;
+  var q = $("fNome").value.trim(), seq = ++buscaSeq;
+  f.nome = q;
+  if (!q && GEO.lat == null){ f.sugs = []; return renderSugs(); }
+  sb.rpc("buscar_locais", { p_nome: q, p_lat: GEO.lat, p_lng: GEO.lng }).then(function(r){
+    if (seq !== buscaSeq || !S.form || S.form.modo !== "busca") return;
+    f.sugs = r.error ? [] : (r.data || []);
+    f.sugsErro = r.error ? traduzErro(r.error) : "";
+    renderSugs();
+  });
 }
+function renderSugs(){
+  var el = $("sugs"), f = S.form; if (!el) return;
+  if (f.sugsErro){ el.innerHTML = '<div class="err">' + esc(f.sugsErro) + '</div>'; return; }
+  if (!f.sugs.length){ el.innerHTML = ""; return; }
+  var q = $("fNome") ? $("fNome").value.trim() : "";
+  var h = '<div class="faint" style="margin-bottom:8px">' + (q ? "Já existe no catálogo? Escolha para não duplicar:" : "Lugares perto de você:") + '</div>';
+  f.sugs.forEach(function(x){
+    var noGrupo = S.lugares.some(function(l){ return l.local_id === x.id; });
+    var meta = [x.distancia_m != null ? (x.distancia_m < 1000 ? x.distancia_m + " m" : (x.distancia_m / 1000).toFixed(1).replace(".", ",") + " km") : null,
+      x.n_grupos ? x.n_grupos + (x.n_grupos === 1 ? " grupo usa" : " grupos usam") : null].filter(Boolean).join(" · ");
+    h += '<div class="card click" data-act="pickLocal" data-id="' + esc(x.id) + '"><div class="row"><div class="grow">' +
+      '<div class="title">' + esc(x.nome) + '</div><div class="muted">' + resumoLocal(x) + '</div>' +
+      (meta ? '<div class="faint">' + esc(meta) + '</div>' : '') + '</div>' +
+      (noGrupo ? '<span class="tag plain">No seu grupo</span>' : '<span class="tag">É este</span>') + '</div></div>';
+  });
+  el.innerHTML = h;
+}
+function pickLocal(id){
+  var f = S.form, x = f.sugs.filter(function(s){ return s.id === id; })[0]; if (!x) return;
+  var jaTem = S.lugares.filter(function(l){ return l.local_id === id; })[0];
+  if (jaTem) return go("#/g/" + S.grupo.id + "/lugar/" + jaTem.id);
+  f.modo = "existente"; f.local = x; renderForm();
+}
+function novoLocal(){
+  var f = S.form, nome = $("fNome").value.trim();
+  if (nome.length < 2){ toast("Digite o nome do lugar primeiro."); return; }
+  f.nome = nome; f.modo = "novo";
+  if (GEO.lat != null){ f.lat = GEO.lat; f.lng = GEO.lng; f.precisao = "gps"; }
+  renderForm();
+}
+
+/* mapa para marcar/ajustar o pin (OpenStreetMap + Leaflet) */
+function montarMapa(){
+  var el = $("mapa"), f = S.form;
+  if (!window.L){ el.innerHTML = '<p class="faint" style="padding:12px">Mapa indisponível agora. Você pode salvar sem localização.</p>'; return; }
+  var centro, zoom = 16, u = null;
+  try { u = JSON.parse(lsGet("role_ultimo") || "null"); } catch(e){}
+  if (f.lat != null) centro = [f.lat, f.lng];
+  else if (GEO.lat != null) centro = [GEO.lat, GEO.lng];
+  else if (u) centro = u;
+  else { centro = [-14.2, -51.9]; zoom = 4; }
+  S.map = L.map(el).setView(centro, f.lat != null ? 17 : zoom);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(S.map);
+  S.map.on("click", function(e){ colocarPin(e.latlng.lat, e.latlng.lng, "ajustada"); });
+  if (f.lat != null) colocarPin(f.lat, f.lng, f.precisao, true);
+  atualizarMapStatus();
+}
+function colocarPin(lat, lng, prec, semCentrar){
+  var f = S.form; if (!S.map) return;
+  f.lat = lat; f.lng = lng; f.precisao = prec;
+  if (!S.pin){
+    S.pin = L.marker([lat, lng], { draggable: true, icon: L.divIcon({ html: "📍", className: "pin", iconSize: [30, 30], iconAnchor: [15, 28] }) }).addTo(S.map);
+    S.pin.on("dragend", function(){ var p = S.pin.getLatLng(); colocarPin(p.lat, p.lng, "ajustada", true); });
+  } else S.pin.setLatLng([lat, lng]);
+  if (!semCentrar) S.map.setView([lat, lng], Math.max(S.map.getZoom(), 17));
+  atualizarMapStatus();
+}
+function atualizarMapStatus(){
+  var el = $("mapStatus"), f = S.form; if (!el) return;
+  el.textContent = f.lat == null ? "Sem localização marcada" : f.precisao === "gps" ? "📍 Marcado pelo GPS" : "📍 Marcado por você";
+}
+function usarLocalizacao(){
+  pedirLocalizacao(function(){
+    var f = S.form; if (!f) return;
+    if (f.modo === "busca") buscarLocais();
+    else if (S.map && GEO.lat != null) colocarPin(GEO.lat, GEO.lng, "gps");
+    else if (GEO.estado === "negado") toast("Não consegui sua localização. Permita o acesso no navegador.");
+  });
+}
+
 function salvarLugar(){
-  var nome = $("fNome").value.trim();
-  if (!nome){ $("fErr").textContent = "O nome é obrigatório."; return; }
+  var f = S.form, err = $("fErr"); err.textContent = "";
   var maps = $("fMaps").value.trim();
-  if (maps && !/^https?:\/\//i.test(maps)){ $("fErr").textContent = "O link precisa começar com http:// ou https://"; return; }
-  var cidade = $("fCidade").value.trim();
-  var payload = {
-    nome: nome, categoria: S.form.categoria, estado: S.form.estado, atributos: S.form.atributos,
-    bairro: $("fBairro").value.trim() || null, cidade: cidade || null, maps_url: maps || null
-  };
-  if (cidade) lsSet("role_cidade", cidade);
-  $("fOk").disabled = true; $("fErr").textContent = "";
-  var op;
-  if (S.form.id) op = sb.from("lugares").update(payload).eq("id", S.form.id).select().single();
-  else { payload.grupo_id = S.grupo.id; op = sb.from("lugares").insert(payload).select().single(); }
-  op.then(function(r){
-    if (r.error){ $("fOk").disabled = false; $("fErr").textContent = traduzErro(r.error); return; }
-    var novo = !S.form.id, destino = r.data.id, jaFomos = payload.estado === "ja_fomos";
-    carregarGrupo(S.grupo.id).then(function(){
-      if (novo && jaFomos) go("#/g/" + S.grupo.id + "/visita/" + destino);
+  if (maps && !/^https?:\/\//i.test(maps)){ err.textContent = "O link precisa começar com http:// ou https://"; return; }
+  var grupoPay = { estado: f.estado, atributos: f.atributos, maps_url: maps || null };
+  var editaLocal = f.modo === "novo" || (f.modo === "editar" && f.editavelLocal), local = null;
+  if (editaLocal){
+    var nome = $("fNome").value.trim();
+    if (!nome){ err.textContent = "O nome é obrigatório."; return; }
+    var cidade = $("fCidade").value.trim();
+    if (cidade) lsSet("role_cidade", cidade);
+    local = { nome: nome, categoria: f.categoria, bairro: $("fBairro").value.trim() || null, cidade: cidade || null,
+      lat: f.lat, lng: f.lng, precisao: f.lat == null ? "desconhecida" : f.precisao };
+  }
+  $("fOk").disabled = true;
+  var novo = f.modo !== "editar", compartilhado = false, p;
+  if (f.modo === "novo"){
+    p = sb.from("locais").insert(local).select().single().then(function(r){
+      if (r.error) throw r.error;
+      return sb.from("lugares").insert(Object.assign({ grupo_id: S.grupo.id, local_id: r.data.id }, grupoPay)).select().single();
+    });
+  } else if (f.modo === "existente"){
+    p = sb.from("lugares").insert(Object.assign({ grupo_id: S.grupo.id, local_id: f.local.id }, grupoPay)).select().single();
+  } else {
+    p = (editaLocal ? sb.from("locais").update(local).eq("id", f.localId).select() : Promise.resolve({ data: [1] })).then(function(r){
+      if (r.error) throw r.error;
+      if (!r.data || !r.data.length) compartilhado = true;
+      return sb.from("lugares").update(grupoPay).eq("id", f.id).select().single();
+    });
+  }
+  p.then(function(r){
+    if (r.error) throw r.error;
+    var destino = r.data.id;
+    return carregarGrupo(S.grupo.id).then(function(){
+      if (compartilhado) toast("Nome e localização não mudaram: outro grupo usa este lugar.");
+      if (novo && grupoPay.estado === "ja_fomos") go("#/g/" + S.grupo.id + "/visita/" + destino);
       else go("#/g/" + S.grupo.id + "/lugar/" + destino);
     });
+  }).catch(function(e){
+    $("fOk").disabled = false;
+    err.textContent = (e && e.code === "23505") ? "Esse lugar já está no seu grupo." : traduzErro(e);
   });
 }
 function apagarLugar(){
   var l = lugarPorId(S.form.id);
-  if (!confirm("Apagar \"" + l.nome + "\" e todas as visitas e avaliações? Isso não dá para desfazer.")) return;
+  if (!confirm("Remover \"" + l.nome + "\" do grupo? As visitas e avaliações dele neste grupo serão apagadas. O lugar continua no catálogo.")) return;
   sb.from("lugares").delete().eq("id", l.id).then(function(r){
     if (r.error){ toast(traduzErro(r.error)); return; }
     carregarGrupo(S.grupo.id).then(function(){ go("#/g/" + S.grupo.id); });
@@ -633,6 +801,10 @@ document.addEventListener("click", function(e){
       var i = S.form.atributos.indexOf(d.v);
       if (i >= 0) S.form.atributos.splice(i, 1); else S.form.atributos.push(d.v);
       return marcar(el.parentNode, el, true);
+    case "usarLoc": return usarLocalizacao();
+    case "pickLocal": return pickLocal(d.id);
+    case "novoLocal": return novoLocal();
+    case "voltaBusca": S.form.modo = "busca"; return renderForm() || buscarLocais();
     case "salvarLugar": return salvarLugar();
     case "apagarLugar": return apagarLugar();
     case "salvarVisita": return salvarVisita();
