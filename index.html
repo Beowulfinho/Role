@@ -16,6 +16,9 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Inter:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@maplibre/maplibre-gl-leaflet@0.0.22/leaflet-maplibre-gl.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <style>
   :root{
@@ -100,12 +103,22 @@
   .pin{background:none;border:0;font-size:28px;line-height:30px}
   .map.big{height:min(62vh,560px);min-height:320px}
   .mkwrap{background:none;border:0}
-  .mk{width:36px;height:36px;border-radius:50%;border:3px solid #fff;color:#fff;display:flex;align-items:center;justify-content:center;
-    font:700 13px "Bricolage Grotesque",sans-serif;box-shadow:0 2px 6px rgba(0,0,0,.4)}
-  .mk.good{background:#2E7D4F} .mk.mid{background:#B07A12} .mk.bad{background:#B53A2D} .mk.none{background:#6B625A}
-  .mk.plan{background:#D9552B;font-size:17px}
-  .eu{background:#2F6FDE;border:3px solid #fff;border-radius:50%;box-shadow:0 0 0 6px rgba(47,111,222,.25)}
-  .leaflet-popup-content{color:#26211D;margin:12px 14px;font-family:Inter,system-ui,sans-serif}
+  .mk{width:32px;height:32px;border-radius:50%;background:var(--accent);color:var(--accent-ink);border:2px solid var(--card);
+    display:flex;align-items:center;justify-content:center;font:700 12px "Bricolage Grotesque",sans-serif;box-shadow:0 1px 4px rgba(0,0,0,.3)}
+  .mk.plan{background:var(--card);color:var(--accent);border:2px solid var(--accent);font-size:15px}
+  .eu{width:16px;height:16px;border-radius:50%;background:var(--ink);border:3px solid var(--card);box-shadow:0 0 0 6px rgba(120,120,120,.22)}
+  .leaflet-container{background:var(--bg);font-family:Inter,system-ui,sans-serif}
+  .leaflet-container .maplibregl-canvas{filter:sepia(.18) saturate(.9)}
+  .mapa-escuro .maplibregl-canvas{filter:invert(1) hue-rotate(180deg) sepia(.15) brightness(.88) contrast(.9)}
+  .mapa-raster .leaflet-tile-pane{filter:grayscale(.85) contrast(.92) brightness(1.04)}
+  .mapa-raster.mapa-escuro .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) grayscale(.8) brightness(.8)}
+  .leaflet-control-attribution{background:transparent !important;color:var(--ink-faint) !important;font-size:10px;padding:0 6px}
+  .leaflet-control-attribution a{color:var(--ink-faint) !important}
+  .leaflet-control.iconbtn{box-shadow:var(--shadow);margin:10px}
+  .leaflet-popup-content-wrapper{background:var(--card);color:var(--ink);border-radius:14px;box-shadow:0 4px 18px rgba(0,0,0,.22)}
+  .leaflet-popup-tip{background:var(--card)}
+  .leaflet-popup-content{margin:12px 14px;color:var(--ink);font-family:Inter,system-ui,sans-serif}
+  .leaflet-container a.leaflet-popup-close-button{color:var(--ink-soft)}
   .rev{border-top:1px solid var(--line);padding-top:10px;margin-top:10px}
   .rev:first-child{border-top:0;padding-top:0;margin-top:0}
 </style>
@@ -410,6 +423,24 @@ function renderCards(){
   }
   $("cards").innerHTML = h;
 }
+/* ---------- base de mapa minimalista (CARTO claro/escuro, sem chave) ---------- */
+function criarMapa(el, centro, zoom){
+  var m = L.map(el, { zoomControl: false, attributionControl: false }).setView(centro, zoom);
+  var escuro = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  var cont = m.getContainer(); if (escuro) cont.classList.add("mapa-escuro");
+  var base = "© OpenStreetMap";
+  if (window.maplibregl && L.maplibreGL){
+    // estilo vetorial minimalista e gratuito (OpenFreeMap), sem chave de API
+    L.maplibreGL({ style: "https://tiles.openfreemap.org/styles/positron" }).addTo(m);
+    base = "OpenFreeMap © OpenMapTiles, dados © OpenStreetMap";
+  } else {
+    cont.classList.add("mapa-raster");
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(m);
+  }
+  L.control.attribution({ prefix: false }).addAttribution(base).addTo(m);
+  return m;
+}
+
 /* ---------- mapa do grupo ---------- */
 function limparMapaGrupo(){
   if (S.mapaG){ S.mapaG.remove(); S.mapaG = null; S.mapaMarcas = null; S.mapaEu = null; }
@@ -417,13 +448,13 @@ function limparMapaGrupo(){
 function marcadorLugar(l, st){
   var plan = l.estado === "quero_ir";
   return L.marker([l.lat, l.lng], { icon: L.divIcon({
-    className: "mkwrap", html: '<div class="mk ' + (plan ? "plan" : notaClasse(st.media)) + '">' + (plan ? "☆" : fmtNota(st.media)) + "</div>",
-    iconSize: [36, 36], iconAnchor: [18, 18], popupAnchor: [0, -18] }) });
+    className: "mkwrap", html: '<div class="mk' + (plan ? " plan" : "") + '">' + (plan ? "☆" : fmtNota(st.media)) + "</div>",
+    iconSize: [32, 32], iconAnchor: [16, 16], popupAnchor: [0, -16] }) });
 }
 function popupLugar(l, st){
   var box = document.createElement("div");
   var c = CAT[l.categoria] || CAT.outro;
-  box.innerHTML = '<b>' + esc(l.nome) + '</b><div style="color:#6B625A;font-size:13px;margin:2px 0 8px">' +
+  box.innerHTML = '<b>' + esc(l.nome) + '</b><div style="color:var(--ink-soft);font-size:13px;margin:2px 0 8px">' +
     [c[1] + " " + c[2], l.bairro].filter(Boolean).map(esc).join(" · ") +
     (l.estado === "ja_fomos" ? " · nota " + fmtNota(st.media) : " · quero ir") + "</div>";
   var b = document.createElement("button");
@@ -441,13 +472,11 @@ function renderMapa(lista){
     box.innerHTML = '<div id="mapaGrupo" class="map big"></div>' +
       '<div class="faint" id="mapaInfo" style="margin-top:8px;padding-right:120px"></div>';
     var u = null; try { u = JSON.parse(lsGet("role_ultimo") || "null"); } catch(e){}
-    S.mapaG = L.map("mapaGrupo").setView(u || [-14.2, -51.9], u ? 12 : 4);
-    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(S.mapaG);
+    S.mapaG = criarMapa("mapaGrupo", u || [-14.2, -51.9], u ? 12 : 4);
     S.mapaMarcas = L.layerGroup().addTo(S.mapaG);
     var ctl = L.control({ position: "topright" });
     ctl.onAdd = function(){
       var b = L.DomUtil.create("button", "iconbtn"); b.type = "button"; b.textContent = "📍 Onde estou";
-      b.style.cssText = "background:#fff;color:#26211D;border:2px solid rgba(0,0,0,.2);box-shadow:none";
       L.DomEvent.disableClickPropagation(b);
       L.DomEvent.on(b, "click", mapaOndeEstou);
       return b;
@@ -467,7 +496,7 @@ function mapaOndeEstou(){
     if (!S.mapaG) return;
     if (GEO.lat == null){ toast("Não consegui sua localização. Permita o acesso no navegador."); return; }
     if (S.mapaEu) S.mapaEu.remove();
-    S.mapaEu = L.marker([GEO.lat, GEO.lng], { interactive: false, icon: L.divIcon({ className: "mkwrap", html: '<div class="eu" style="width:18px;height:18px"></div>', iconSize: [18, 18], iconAnchor: [9, 9] }) }).addTo(S.mapaG);
+    S.mapaEu = L.marker([GEO.lat, GEO.lng], { interactive: false, icon: L.divIcon({ className: "mkwrap", html: '<div class="eu"></div>', iconSize: [16, 16], iconAnchor: [8, 8] }) }).addTo(S.mapaG);
     S.mapaG.setView([GEO.lat, GEO.lng], Math.max(S.mapaG.getZoom(), 15));
   });
 }
@@ -682,8 +711,7 @@ function montarMapa(){
   else if (GEO.lat != null) centro = [GEO.lat, GEO.lng];
   else if (u) centro = u;
   else { centro = [-14.2, -51.9]; zoom = 4; }
-  S.map = L.map(el).setView(centro, f.lat != null ? 17 : zoom);
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(S.map);
+  S.map = criarMapa(el, centro, f.lat != null ? 17 : zoom);
   S.map.on("click", function(e){ colocarPin(e.latlng.lat, e.latlng.lng, "ajustada"); });
   if (f.lat != null) colocarPin(f.lat, f.lng, f.precisao, true);
   atualizarMapStatus();
@@ -692,7 +720,7 @@ function colocarPin(lat, lng, prec, semCentrar){
   var f = S.form; if (!S.map) return;
   f.lat = lat; f.lng = lng; f.precisao = prec;
   if (!S.pin){
-    S.pin = L.marker([lat, lng], { draggable: true, icon: L.divIcon({ html: "📍", className: "pin", iconSize: [30, 30], iconAnchor: [15, 28] }) }).addTo(S.map);
+    S.pin = L.marker([lat, lng], { draggable: true, icon: L.divIcon({ html: '<div class="mk" style="width:26px;height:26px"></div>', className: "mkwrap", iconSize: [26, 26], iconAnchor: [13, 13] }) }).addTo(S.map);
     S.pin.on("dragend", function(){ var p = S.pin.getLatLng(); colocarPin(p.lat, p.lng, "ajustada", true); });
   } else S.pin.setLatLng([lat, lng]);
   if (!semCentrar) S.map.setView([lat, lng], Math.max(S.map.getZoom(), 17));
