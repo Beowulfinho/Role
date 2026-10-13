@@ -168,7 +168,7 @@ var ATR = {}; ATRIBUTOS.forEach(function(a){ ATR[a[0]] = a[1]; });
 
 var S = {
   user: null, grupos: [], grupo: null, membros: [], perfis: {}, lugares: [],
-  somenteLeitura: false, authModo: "login", vista: lsGet("role_vista") === "mapa" ? "mapa" : "lista", aba: "rolos", cat: "", busca: "", form: null
+  somenteLeitura: false, ordem: lsGet("role_ordem") === "data" ? "data" : "nota", authModo: "login", vista: lsGet("role_vista") === "mapa" ? "mapa" : "lista", aba: "ja_fomos", cat: "", busca: "", form: null
 };
 
 var app = document.getElementById("app");
@@ -390,17 +390,16 @@ function entrarGrupo(codigo, silencioso){
 /* ---------- lista de lugares ---------- */
 function viewLista(){
   limparMapaGrupo();
-  if (S.somenteLeitura && S.aba === "rolos") S.aba = "ja_fomos";
   var g = S.grupo;
   var h = '<div class="top"><button class="iconbtn" data-act="irGrupos" aria-label="Grupos">‹</button><h1>' + esc(g.nome) + '</h1>' +
-    (S.aba === "rolos" && !S.somenteLeitura ? '' : '<button class="iconbtn" data-act="vista">' + (S.vista === "mapa" ? "☰ Lista" : "🗺️ Mapa") + '</button>') +
+    '<button class="iconbtn" data-act="vista">' + (S.vista === "mapa" ? "☰ Lista" : "🗺️ Mapa") + '</button>' +
     (S.somenteLeitura ? '<span class="tag">Público</span>' : '<button class="iconbtn" data-act="convidar">Convidar</button>') + '</div>' +
     '<div class="tabs" style="margin-bottom:12px">' +
-      (S.somenteLeitura ? '' : '<button data-act="aba" data-v="rolos" class="' + (S.aba === "rolos" ? "on" : "") + '">Rolês</button>') +
       '<button data-act="aba" data-v="ja_fomos" class="' + (S.aba === "ja_fomos" ? "on" : "") + '">Já fomos</button>' +
       '<button data-act="aba" data-v="quero_ir" class="' + (S.aba === "quero_ir" ? "on" : "") + '">Quero ir</button></div>' +
     '<input type="text" id="busca" placeholder="Buscar lugar…" value="' + esc(S.busca) + '" style="margin-bottom:10px">' +
     '<div class="chips scroll" id="catChips" style="margin-bottom:12px"></div>' +
+    '<div id="ordemBox"></div>' +
     '<div id="cards"></div>' +
     (S.somenteLeitura ? '' : '<button class="fab" data-act="novoLugar">Novo rolê</button>');
   app.innerHTML = h;
@@ -408,7 +407,6 @@ function viewLista(){
   renderCards();
 }
 function renderCards(){
-  if (S.aba === "rolos" && !S.somenteLeitura) return renderRolos();
   var q = norm(S.busca);
   var daAba = S.lugares.filter(function(l){ return l.estado === S.aba; });
   var cats = {}; daAba.forEach(function(l){ cats[l.categoria] = true; });
@@ -417,10 +415,20 @@ function renderCards(){
     if (cats[c[0]]) ch += '<button class="chip ' + (S.cat === c[0] ? "on" : "") + '" data-act="cat" data-v="' + c[0] + '">' + c[1] + " " + esc(c[2]) + "</button>";
   });
   $("catChips").innerHTML = ch;
+  var ob = $("ordemBox");
+  if (ob) ob.innerHTML = (S.aba === "ja_fomos" && !S.somenteLeitura && S.vista !== "mapa")
+    ? '<div class="chips" style="margin:0 0 10px"><span class="faint" style="align-self:center">Ordenar:</span>' +
+      '<button class="chip ' + (S.ordem !== "data" ? "on" : "") + '" data-act="ordem" data-v="nota">Nota</button>' +
+      '<button class="chip ' + (S.ordem === "data" ? "on" : "") + '" data-act="ordem" data-v="data">Mais recentes</button></div>' : "";
   var lista = daAba.filter(function(l){
     return (!S.cat || l.categoria === S.cat) && (!q || norm(l.nome + " " + (l.bairro||"") + " " + (l.cidade||"")).indexOf(q) >= 0);
   }).map(function(l){ return { l:l, s:stats(l) }; });
-  if (S.aba === "ja_fomos") lista.sort(function(a,b){ return (b.s.media == null ? -1 : b.s.media) - (a.s.media == null ? -1 : a.s.media); });
+  if (S.aba === "ja_fomos"){
+    if (S.ordem === "data" && !S.somenteLeitura){
+      var ult = function(l){ var d = (l.visitas || []).map(function(v){ return v.data; }).sort(); return d.length ? d[d.length - 1] : ""; };
+      lista.sort(function(a, b){ var x = ult(a.l), y = ult(b.l); return x < y ? 1 : x > y ? -1 : 0; });
+    } else lista.sort(function(a,b){ return (b.s.media == null ? -1 : b.s.media) - (a.s.media == null ? -1 : a.s.media); });
+  }
   if (S.vista === "mapa") return renderMapa(lista);
   limparMapaGrupo();
   var h = "";
@@ -428,66 +436,26 @@ function renderCards(){
     var l = x.l, s = x.s, c = CAT[l.categoria] || CAT.outro;
     var sub = [c[1] + " " + c[2], l.bairro, l.cidade].filter(Boolean).map(esc).join(" · ");
     var meta = [];
-    if (s.nVisitas) meta.push(s.nVisitas + (s.nVisitas === 1 ? " visita" : " visitas"));
+    var datas = (l.visitas || []).map(function(v){ return v.data; }).sort();
+    if (datas.length) meta.push("📅 " + fmtData(datas[datas.length - 1]));
+    if (s.nVisitas > 1) meta.push(s.nVisitas + " rolês");
+    var comFoto = (l.visitas || []).slice().sort(function(a, b){ return a.data < b.data ? 1 : -1; }).filter(function(v){ return (v.fotos || []).length; })[0];
+    var capa = comFoto ? ordenarFotos(comFoto)[0] : null;
     if (s.gastoPP != null) meta.push(fmtMoney(s.gastoPP) + "/pessoa");
     if (s.voltamTotal) meta.push(s.voltam + "/" + s.voltamTotal + " voltariam");
     h += '<div class="card click" data-act="abrirLugar" data-id="' + esc(l.id) + '"><div class="row">' +
       (S.aba === "ja_fomos" ? '<div class="score ' + notaClasse(s.media) + '">' + fmtNota(s.media) + '</div>' : '') +
       '<div class="grow"><div class="title">' + esc(l.nome) + (s.nunca ? ' <span class="faint">🚫</span>' : '') + '</div>' +
       '<div class="muted">' + sub + '</div>' + (meta.length ? '<div class="faint">' + esc(meta.join(" · ")) + '</div>' : '') +
-      '</div></div></div>';
+      '</div>' + (capa ? '<img class="thumb-rolo" data-path="' + esc(pathThumb(capa.caminho)) + '" alt="">' : '') + '</div></div>';
   });
   if (!lista.length){
     h = '<div class="empty"><div class="big">' + (S.aba === "ja_fomos" ? "🍽️" : "✨") + '</div>' +
       (S.lugares.length ? "Nada por aqui com esses filtros." : S.somenteLeitura ? "Este catálogo ainda não tem lugares." : "Nenhum lugar ainda.<br>Toque em <b>Novo rolê</b> para começar.") + '</div>';
   }
   $("cards").innerHTML = h;
-}
-/* ---------- lista de rolês (linha do tempo por data) ---------- */
-function htmlChipsCategorias(cats){
-  var ch = '<button class="chip ' + (!S.cat ? "on" : "") + '" data-act="cat" data-v="">Todos</button>';
-  CATEGORIAS.forEach(function(c){
-    if (cats[c[0]]) ch += '<button class="chip ' + (S.cat === c[0] ? "on" : "") + '" data-act="cat" data-v="' + c[0] + '">' + c[1] + " " + esc(c[2]) + "</button>";
-  });
-  return ch;
-}
-function renderRolos(){
-  limparMapaGrupo();
-  var q = norm(S.busca), itens = [], cats = {};
-  S.lugares.forEach(function(l){ (l.visitas || []).forEach(function(v){ itens.push({ l: l, v: v }); cats[l.categoria] = true; }); });
-  $("catChips").innerHTML = htmlChipsCategorias(cats);
-  itens = itens.filter(function(x){
-    return (!S.cat || x.l.categoria === S.cat) && (!q || norm(x.l.nome + " " + (x.l.bairro || "") + " " + (x.l.cidade || "")).indexOf(q) >= 0);
-  });
-  itens.sort(function(a, b){
-    if (a.v.data !== b.v.data) return a.v.data < b.v.data ? 1 : -1;
-    return a.v.created_at < b.v.created_at ? 1 : -1;
-  });
-  var h = "";
-  itens.forEach(function(x){
-    var l = x.l, v = x.v, c = CAT[l.categoria] || CAT.outro;
-    var nota = avg((v.avaliacoes || []).map(function(a){ return Number(a.nota); }));
-    var fs = ordenarFotos(v);
-    var meta = [];
-    if (v.num_pessoas) meta.push(v.num_pessoas + (v.num_pessoas === 1 ? " pessoa" : " pessoas"));
-    if (v.gasto_total != null) meta.push(fmtMoney(Number(v.gasto_total)));
-    if (fs.length) meta.push("📷 " + fs.length);
-    h += '<div class="card click" data-act="abrirLugar" data-id="' + esc(l.id) + '"><div class="row">' +
-      '<div class="score ' + notaClasse(nota) + '">' + fmtNota(nota) + '</div>' +
-      '<div class="grow"><div class="title">' + esc(l.nome) + '</div>' +
-      '<div class="muted">📅 ' + esc(fmtData(v.data)) + ' · ' + esc(c[1] + " " + c[2]) + '</div>' +
-      (meta.length ? '<div class="faint">' + esc(meta.join(" · ")) + '</div>' : '') + '</div>' +
-      (fs.length ? '<img class="thumb-rolo" data-path="' + esc(pathThumb(fs[0].caminho)) + '" alt="">' : '') +
-      '</div></div>';
-  });
-  if (!itens.length){
-    h = '<div class="empty"><div class="big">🎉</div>' +
-      (S.lugares.length && itens.length === 0 && (q || S.cat) ? "Nada por aqui com esses filtros." : "Nenhum rolê ainda.<br>Toque em <b>Novo rolê</b> para começar.") + '</div>';
-  }
-  $("cards").innerHTML = h;
   carregarImagens($("cards"));
 }
-
 /* ---------- base de mapa minimalista (CARTO claro/escuro, sem chave) ---------- */
 function criarMapa(el, centro, zoom){
   var m = L.map(el, { zoomControl: false, attributionControl: false }).setView(centro, zoom);
@@ -1248,7 +1216,7 @@ function salvarVisita(){
     return carregarGrupo(S.grupo.id);
   }).then(function(){
     if (falhas) toast(falhas === 1 ? "Uma foto não foi enviada. Edite o rolê para tentar de novo." : falhas + " fotos não foram enviadas. Edite o rolê para tentar de novo.");
-    if (novo){ S.aba = "rolos"; go("#/g/" + S.grupo.id); }
+    if (novo){ S.aba = "ja_fomos"; go("#/g/" + S.grupo.id); }
     else go("#/g/" + S.grupo.id + "/lugar/" + f.lugarId);
   }).catch(function(e){
     btn.disabled = false; btn.textContent = "Salvar rolê"; $("fErr").textContent = traduzErro(e);
@@ -1300,6 +1268,7 @@ document.addEventListener("click", function(e){
     case "cat": S.cat = d.v; return renderCards();
     case "vista": S.vista = S.vista === "mapa" ? "lista" : "mapa"; lsSet("role_vista", S.vista); return viewLista();
     case "mapaEu": return mapaOndeEstou();
+    case "ordem": S.ordem = d.v; lsSet("role_ordem", S.ordem); return renderCards();
     case "novoLugar": return go("#/g/" + g + "/novo");
     case "abrirLugar": if (S.somenteLeitura) return sheetLugarPublico(d.id); return go("#/g/" + g + "/lugar/" + d.id);
     case "editarLugar": return go("#/g/" + g + "/editar/" + d.id);
