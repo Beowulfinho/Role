@@ -242,6 +242,7 @@ function traduzErro(e){
   if (/Email not confirmed/i.test(m)) return "Confirme seu e-mail antes de entrar.";
   if (/outro grupo usa/i.test(m)) return "Outro grupo usa este lugar, então não dá para mesclar por aqui.";
   if (/sem permissao/i.test(m)) return "Você não tem permissão para mesclar este lugar.";
+  if (/row-level security/i.test(m)) return "Sem permissão: só quem foi ao rolê avalia, e só quem criou o rolê pode editá-lo.";
   if (/role em grupo precisa/i.test(m)) return "Um rolê em grupo precisa de pelo menos 2 pessoas. Se foi só você, registre no seu catálogo pessoal.";
   if (/criador deve participar/i.test(m)) return "Quem criou o rolê precisa continuar entre os participantes.";
   if (/selecione ao menos um participante/i.test(m)) return "Selecione pelo menos um integrante que foi ao rolê.";
@@ -272,7 +273,7 @@ function stats(l){
   var com = avs.filter(function(a){ return a.voltaria; });
   return {
     nVisitas: vis.length,
-    media: avg(avs.map(function(a){ return Number(a.nota); })),
+    media: avg(vis.map(function(v){ return avg((v.avaliacoes || []).map(function(a){ return Number(a.nota); })); }).filter(function(x){ return x != null; })),
     cb: avg(cbs),
     gastoPP: avg(gpp),
     voltam: com.filter(function(a){ return a.voltaria === "sim"; }).length,
@@ -335,6 +336,8 @@ function route(){
       if (sub === "novo") return viewFormLugar(null);
       if (sub === "editar" && p[3]) return viewFormLugar(p[3]);
       if (sub === "visita" && p[3]) return viewFormVisita(p[3], p[4] || null);
+      if (sub === "role" && p[3] && p[4]) return viewRole(p[3], p[4]);
+      if (sub === "avaliar" && p[3] && p[4]) return viewFormAvaliacao(p[3], p[4]);
       viewLista();
     }).catch(function(e){ toast(traduzErro(e)); go("#/grupos"); });
     return;
@@ -383,7 +386,7 @@ function viewGrupos(){
   var pend = pedidosRecebidos().length;
   var h = '<div class="top">' + htmlMarca() + '<h1>Seus grupos</h1><button class="iconbtn" data-act="menu" aria-label="Menu" style="position:relative;font-size:20px;line-height:1">⋮' +
     (pend ? '<span class="dot"></span>' : '') + '</button></div>';
-  h += '<p class="muted" id="saudacao" style="margin-top:0">' + saudacaoHtml() + '</p>';
+  h += '<p class="muted" id="saudacao" style="margin-top:0">' + saudacaoHtml() + '</p><div id="pendBox"></div>';
   var lista = S.grupos.filter(function(g){ return g.tipo !== "pessoal"; });
   if (!lista.length){
     h += '<div class="empty"><div class="big">👫</div>Crie um grupo para o casal ou os amigos,<br>ou entre com um código de convite.</div>';
@@ -397,6 +400,7 @@ function viewGrupos(){
     '<button class="btn sec" data-act="sheetEntrar">Entrar com código</button></div>';
   app.innerHTML = h;
   atualizarSaudacao();
+  carregarPendencias();
 }
 
 /* ---------- menu ⋮ e perfil ---------- */
@@ -903,7 +907,8 @@ function renderCards(){
     if (s.voltamTotal) meta.push(s.voltam + "/" + s.voltamTotal + " voltariam");
     h += '<div class="card click" data-act="abrirLugar" data-id="' + esc(l.id) + '"><div class="row">' +
       (S.aba === "ja_fomos" ? '<div class="score ' + notaClasse(s.media) + '">' + fmtNota(s.media) + '</div>' : '') +
-      '<div class="grow"><div class="title">' + esc(l.nome) + (s.nunca ? ' <span class="faint">🚫</span>' : '') + '</div>' +
+      '<div class="grow"><div class="title">' + esc(l.nome) + (s.nunca ? ' <span class="faint">🚫</span>' : '') +
+      (!S.somenteLeitura && tenhoPendencia(l) ? ' <span class="tag">Avalie seu rolê</span>' : '') + '</div>' +
       '<div class="muted">' + sub + '</div>' + (meta.length ? '<div class="faint">' + esc(meta.join(" · ")) + '</div>' : '') +
       '</div>' + (capa ? '<img class="thumb-rolo" data-path="' + esc(pathThumb(capa.caminho)) + '" alt="">' : '') + '</div></div>';
   });
@@ -1108,23 +1113,15 @@ function viewLugar(id){
   var visitas = (l.visitas||[]).slice().sort(function(a,b){ return a.data < b.data ? 1 : -1; });
   if (!visitas.length) h += '<div class="empty" style="padding:20px 0">Ainda sem rolês. Registre o primeiro!</div>';
   visitas.forEach(function(v){
-    var avs = v.avaliacoes || [], minha = avs.filter(function(a){ return a.user_id === eu; })[0];
-    var quemFoi = (v.visita_participantes || []).map(function(x){ return nomeDe(x.user_id); }).join(", ");
-    h += '<div class="card"><div class="row" style="margin-bottom:8px"><div class="grow"><b>' + fmtData(v.data) + '</b>' +
-      '<div class="faint">' + [v.delivery ? "🛵 Delivery" : null, v.gasto_total != null ? fmtMoney(Number(v.gasto_total)) : null, v.num_pessoas ? v.num_pessoas + " pessoa(s)" : null].filter(Boolean).join(" · ") + '</div>' +
-      (quemFoi ? '<div class="faint">👥 ' + esc(quemFoi) + '</div>' : '') + '</div>' +
-      '<button class="btn sec small" data-act="visita" data-l="' + esc(l.id) + '" data-v="' + esc(v.id) + '">' + (minha ? "Editar" : "Avaliar") + '</button></div>';
-    h += stripFotos(v);
-    avs.forEach(function(a){
-      var vol = VOLTARIA.filter(function(x){ return x[0] === a.voltaria; })[0];
-      h += '<div class="rev"><div class="row"><div class="score ' + notaClasse(Number(a.nota)) + '" style="min-width:38px;height:38px;font-size:16px">' + fmtNota(Number(a.nota)) + '</div>' +
-        '<div class="grow"><b>' + esc(nomeDe(a.user_id)) + '</b><div class="faint">' +
-        [a.custo_beneficio ? "Custo-benefício: " + esc(CB_LABEL[a.custo_beneficio]) : null, vol ? esc(vol[1]) : null].filter(Boolean).join(" · ") + '</div></div></div>' +
-        (a.pedidos ? '<div class="muted" style="margin-top:6px">Pediu: ' + esc(a.pedidos) + '</div>' : '') +
-        (a.comentario ? '<div style="margin-top:4px">' + esc(a.comentario) + '</div>' : '') + '</div>';
-    });
-    if (!avs.length) h += '<div class="faint">Ninguém avaliou ainda.</div>';
-    h += '</div>';
+    var avs = v.avaliacoes || [], parts = v.visita_participantes || [], m = mediaVisita(v);
+    var quemFoi = parts.map(function(x){ return nomeDe(x.user_id); }).join(", ");
+    h += '<div class="card click" data-act="abrirRole" data-l="' + esc(l.id) + '" data-v="' + esc(v.id) + '"><div class="row">' +
+      '<div class="score ' + notaClasse(m) + '">' + fmtNota(m) + '</div>' +
+      '<div class="grow"><b>📅 ' + esc(fmtData(v.data)) + '</b>' +
+      '<div class="faint">' + [v.delivery ? "🛵 Delivery" : null, v.gasto_total != null ? fmtMoney(Number(v.gasto_total)) : null].filter(Boolean).join(" · ") + '</div>' +
+      (quemFoi ? '<div class="faint">👥 ' + esc(quemFoi) + '</div>' : '') +
+      '<div class="faint">' + avs.length + (parts.length ? ' de ' + parts.length : '') + (avs.length === 1 && !parts.length ? ' avaliou' : ' avaliaram') + '</div></div><span>›</span></div>' +
+      stripFotos(v) + '</div>';
   });
   h += '<button class="fab" data-act="visita" data-l="' + esc(l.id) + '">Novo rolê</button>';
   app.innerHTML = h;
@@ -1620,6 +1617,134 @@ function sincronizarFotos(f, visitaId, btn){
   }).then(function(){ return falhas; });
 }
 
+/* ---------- rolê: calificación individual, pantalla del rolê y pendientes ---------- */
+function mediaVisita(v){ return avg((v.avaliacoes || []).map(function(a){ return Number(a.nota); })); }
+function htmlAvaliacao(minha){
+  var nota = minha ? Number(minha.nota) : 8, f = S.form;
+  return '<hr style="margin:2px 0"><h3>Sua avaliação</h3>' +
+    '<div class="notarow"><div class="score ' + notaClasse(nota) + '" id="notaBox">' + fmtNota(nota) + '</div>' +
+      '<div class="grow"><input type="range" id="vNota" min="0" max="10" step="0.5" value="' + nota + '"></div></div>' +
+    '<div><label class="f">Custo-benefício</label><div class="chips" id="gCb">' +
+      [1,2,3,4,5].map(function(n){ return '<button type="button" class="chip ' + (f.cb === n ? "on" : "") + '" data-act="fSingle" data-g="cb" data-v="' + n + '">' + n + ' · ' + esc(CB_LABEL[n]) + '</button>'; }).join("") + '</div></div>' +
+    '<div><label class="f">Voltaria?</label><div class="chips" id="gVoltaria">' +
+      VOLTARIA.map(function(x){ return '<button type="button" class="chip ' + (f.voltaria === x[0] ? "on" : "") + '" data-act="fSingle" data-g="voltaria" data-v="' + x[0] + '">' + esc(x[1]) + '</button>'; }).join("") + '</div></div>' +
+    '<div><label class="f" for="vPedidos">O que você pediu</label><input type="text" id="vPedidos" maxlength="200" value="' + esc(minha ? minha.pedidos : "") + '"></div>' +
+    '<div><label class="f" for="vCom">Comentário</label><textarea id="vCom" maxlength="1000">' + esc(minha ? minha.comentario : "") + '</textarea></div>';
+}
+function bindNota(){
+  var el = $("vNota"); if (!el) return;
+  el.addEventListener("input", function(e){
+    var n = Number(e.target.value), b = $("notaBox");
+    b.textContent = fmtNota(n); b.className = "score " + notaClasse(n);
+  });
+}
+function lerAvaliacao(f){
+  return { nota: Number($("vNota").value), custo_beneficio: f.cb || null, voltaria: f.voltaria || null,
+    pedidos: $("vPedidos").value.trim() || null, comentario: $("vCom").value.trim() || null };
+}
+
+function viewRole(lugarId, visitaId){
+  var l = lugarPorId(lugarId);
+  if (!l) return go("#/g/" + S.grupo.id);
+  var v = (l.visitas || []).filter(function(x){ return x.id === visitaId; })[0];
+  if (!v) return go("#/g/" + S.grupo.id + "/lugar/" + lugarId);
+  var eu = S.user.id, avs = v.avaliacoes || [], parts = (v.visita_participantes || []).map(function(x){ return x.user_id; });
+  var criador = v.criado_por, souCriador = criador === eu, souPart = parts.indexOf(eu) >= 0;
+  var minha = avs.filter(function(a){ return a.user_id === eu; })[0], media = mediaVisita(v);
+  var ordem = parts.slice().sort(function(a, b){
+    if (a === criador) return -1;
+    if (b === criador) return 1;
+    return nomeDe(a).localeCompare(nomeDe(b));
+  });
+  avs.forEach(function(a){ if (ordem.indexOf(a.user_id) < 0) ordem.push(a.user_id); });
+  var h = '<div class="top"><button class="iconbtn" data-act="voltar">‹</button><h1>' + esc(l.nome) + '</h1>' +
+    (souCriador ? '<button class="iconbtn" data-act="visita" data-l="' + esc(l.id) + '" data-v="' + esc(v.id) + '">Editar</button>' : '') + '</div>' +
+    '<div class="card"><div class="title">📅 ' + esc(fmtData(v.data)) + '</div>' +
+      '<div class="muted">' + [v.delivery ? "🛵 Delivery" : "🍽️ Presencial", v.gasto_total != null ? fmtMoney(Number(v.gasto_total)) : null,
+        v.num_pessoas ? v.num_pessoas + (v.num_pessoas === 1 ? " pessoa" : " pessoas") : null].filter(Boolean).map(esc).join(" · ") + '</div>' +
+      '<div class="faint">Rolê criado por ' + esc(nomeDe(criador)) + (souCriador ? " (você)" : "") + '</div></div>' +
+    '<div class="card"><div class="row"><div class="score ' + notaClasse(media) + '">' + fmtNota(media) + '</div>' +
+      '<div class="grow"><div class="title">Nota média do rolê</div><div class="faint">' + avs.length + ' de ' + parts.length + (parts.length === 1 ? " avaliou" : " avaliaram") + '</div></div></div></div>' +
+    stripFotos(v);
+  if (souPart){
+    h += '<button class="btn" style="margin:4px 0 6px" data-act="avaliar" data-l="' + esc(l.id) + '" data-v="' + esc(v.id) + '">' +
+      (minha ? "Editar minha avaliação" : "⭐ Avaliar este rolê") + '</button>';
+  } else {
+    h += '<p class="faint" style="margin:4px 0 6px">Você é do grupo, mas não foi a este rolê. Só quem participou pode avaliar.</p>';
+  }
+  h += '<h3 style="margin:16px 0 8px">Quem foi e o que achou</h3>';
+  ordem.forEach(function(uid){
+    var a = avs.filter(function(x){ return x.user_id === uid; })[0], p = S.perfis[uid] || { nome: "Alguém" };
+    var vol = a ? VOLTARIA.filter(function(x){ return x[0] === a.voltaria; })[0] : null;
+    h += '<div class="card"><div class="row" style="align-items:flex-start">' + htmlAvatar(p, 40) +
+      '<div class="grow"><div class="title">' + esc(p.nome || "Alguém") + (uid === eu ? ' <span class="faint">(você)</span>' : '') + '</div>' +
+        '<div class="faint">' + (uid === criador ? "Criou o rolê" : "Participou") + '</div></div>' +
+      (a ? '<div class="score ' + notaClasse(Number(a.nota)) + '" style="min-width:42px;height:42px;font-size:17px">' + fmtNota(Number(a.nota)) + '</div>' : '') + '</div>';
+    if (a){
+      var linha = [a.custo_beneficio ? "Custo-benefício: " + CB_LABEL[a.custo_beneficio] : null, vol ? vol[1] : null].filter(Boolean).join(" · ");
+      h += (linha ? '<div class="faint" style="margin-top:8px">' + esc(linha) + '</div>' : '') +
+        (a.pedidos ? '<div class="muted" style="margin-top:6px">Pediu: ' + esc(a.pedidos) + '</div>' : '') +
+        (a.comentario ? '<div style="margin-top:6px">' + esc(a.comentario) + '</div>' : '');
+    } else {
+      h += '<div class="faint" style="margin-top:8px">Ainda não avaliou.</div>';
+    }
+    h += '</div>';
+  });
+  app.innerHTML = h;
+  carregarImagens(app);
+}
+
+function viewFormAvaliacao(lugarId, visitaId){
+  var l = lugarPorId(lugarId);
+  if (!l) return go("#/g/" + S.grupo.id);
+  var v = (l.visitas || []).filter(function(x){ return x.id === visitaId; })[0];
+  if (!v) return go("#/g/" + S.grupo.id + "/lugar/" + lugarId);
+  var souPart = (v.visita_participantes || []).some(function(x){ return x.user_id === S.user.id; });
+  if (!souPart){ toast("Só quem foi ao rolê pode avaliar."); return go("#/g/" + S.grupo.id + "/role/" + lugarId + "/" + visitaId); }
+  var minha = (v.avaliacoes || []).filter(function(a){ return a.user_id === S.user.id; })[0];
+  S.form = { modo: "avaliar", lugarId: lugarId, visitaId: visitaId, cb: minha ? minha.custo_beneficio : null, voltaria: minha ? minha.voltaria : null };
+  var quem = (v.visita_participantes || []).map(function(x){ return nomeDe(x.user_id); }).join(", ");
+  app.innerHTML = '<div class="top"><button class="iconbtn" data-act="voltar">‹</button><h1>Minha avaliação</h1></div><div class="stack">' +
+    '<div class="card" style="margin:0"><div class="title">' + esc(l.nome) + '</div><div class="muted">📅 ' + esc(fmtData(v.data)) + '</div>' +
+      (quem ? '<div class="faint">👥 ' + esc(quem) + '</div>' : '') + '</div>' +
+    htmlAvaliacao(minha) +
+    '<div class="faint">Cada pessoa dá a sua nota. No grupo aparece a média do rolê, e dentro do rolê todos veem como cada um avaliou.</div>' +
+    '<div class="err" id="fErr"></div><button class="btn" id="fOk" data-act="salvarAvaliacao">Salvar avaliação</button></div>';
+  bindNota();
+}
+function salvarAvaliacao(){
+  var f = S.form, av = lerAvaliacao(f);
+  av.visita_id = f.visitaId; av.user_id = S.user.id;
+  var btn = $("fOk"); btn.disabled = true; btn.textContent = "Salvando…"; $("fErr").textContent = "";
+  sb.from("avaliacoes").upsert(av, { onConflict: "visita_id,user_id" }).then(function(r){
+    if (r.error) throw r.error;
+    return carregarGrupo(S.grupo.id);
+  }).then(function(){
+    toast("Avaliação salva.");
+    go("#/g/" + S.grupo.id + "/role/" + f.lugarId + "/" + f.visitaId);
+  }).catch(function(e){
+    btn.disabled = false; btn.textContent = "Salvar avaliação"; $("fErr").textContent = traduzErro(e);
+  });
+}
+
+function tenhoPendencia(l){
+  return (l.visitas || []).some(function(v){
+    return (v.visita_participantes || []).some(function(p){ return p.user_id === S.user.id; }) &&
+      !(v.avaliacoes || []).some(function(a){ return a.user_id === S.user.id; });
+  });
+}
+function carregarPendencias(){
+  sb.rpc("minhas_pendencias").then(function(r){
+    var box = $("pendBox"); if (!box) return;
+    if (r.error || !r.data || !r.data.length){ box.innerHTML = ""; return; }
+    box.innerHTML = '<h3 style="margin:0 0 8px">⭐ Rolês para avaliar</h3>' + r.data.slice(0, 5).map(function(p){
+      return '<div class="card click" data-act="avaliarPend" data-g="' + esc(p.grupo_id) + '" data-l="' + esc(p.lugar_id) + '" data-v="' + esc(p.visita_id) + '"><div class="row"><div class="grow">' +
+        '<div class="title">' + esc(p.lugar_nome) + '</div><div class="faint">📅 ' + esc(fmtData(p.data)) + ' · ' + esc(p.grupo_tipo === "pessoal" ? "Meu catálogo" : p.grupo_nome) + '</div></div>' +
+        '<span class="tag">Avaliar</span></div></div>';
+    }).join("") + (r.data.length > 5 ? '<div class="faint" style="margin-bottom:8px">E mais ' + (r.data.length - 5) + '…</div>' : '') + '<hr>';
+  });
+}
+
 /* ---------- formulário do rolê (visita + avaliação + fotos) ---------- */
 function viewFormVisita(lugarId, visitaId){
   var l = lugarPorId(lugarId);
@@ -1653,23 +1778,12 @@ function viewFormVisita(lugarId, visitaId){
     '<div><label class="f">Fotos</label><div class="fotos-grid" id="fotosBox"></div>' +
       '<input type="file" id="fFotos" accept="image/*" multiple hidden>' +
       '<button type="button" class="btn sec" style="margin-top:8px" data-act="addFotos">📷 Adicionar fotos</button></div>' +
-    '<hr style="margin:2px 0"><h3>Sua avaliação</h3>' +
-    '<div class="notarow"><div class="score ' + notaClasse(nota) + '" id="notaBox">' + fmtNota(nota) + '</div>' +
-      '<div class="grow"><input type="range" id="vNota" min="0" max="10" step="0.5" value="' + nota + '"></div></div>' +
-    '<div><label class="f">Custo-benefício</label><div class="chips" id="gCb">' +
-      [1,2,3,4,5].map(function(n){ return '<button class="chip ' + (S.form.cb === n ? "on" : "") + '" data-act="fSingle" data-g="cb" data-v="' + n + '">' + n + ' · ' + esc(CB_LABEL[n]) + '</button>'; }).join("") + '</div></div>' +
-    '<div><label class="f">Voltaria?</label><div class="chips" id="gVoltaria">' +
-      VOLTARIA.map(function(x){ return '<button class="chip ' + (S.form.voltaria === x[0] ? "on" : "") + '" data-act="fSingle" data-g="voltaria" data-v="' + x[0] + '">' + esc(x[1]) + '</button>'; }).join("") + '</div></div>' +
-    '<div><label class="f" for="vPedidos">O que pediram</label><input type="text" id="vPedidos" maxlength="200" value="' + esc(minha ? minha.pedidos : "") + '"></div>' +
-    '<div><label class="f" for="vCom">Comentário</label><textarea id="vCom" maxlength="1000">' + esc(minha ? minha.comentario : "") + '</textarea></div>' +
+    (v ? '' : htmlAvaliacao(null)) +
     '<div class="err" id="fErr"></div>' +
     '<button class="btn" id="fOk" data-act="salvarVisita">Salvar rolê</button>' +
     (v ? '<button class="btn danger" data-act="apagarVisita">Apagar este rolê</button>' : '') + '</div>';
   app.innerHTML = h;
-  $("vNota").addEventListener("input", function(e){
-    var n = Number(e.target.value), b = $("notaBox");
-    b.textContent = fmtNota(n); b.className = "score " + notaClasse(n);
-  });
+  bindNota();
   $("fFotos").addEventListener("change", function(e){ adicionarFotos(e.target.files); e.target.value = ""; });
   renderFotosForm();
   renderParticipantes();
@@ -1698,10 +1812,7 @@ function salvarVisita(){
     num_pessoas: pessoas === "" ? null : parseInt(pessoas, 10),
     delivery: !!f.delivery
   };
-  var av = {
-    nota: Number($("vNota").value), custo_beneficio: f.cb || null, voltaria: f.voltaria || null,
-    pedidos: $("vPedidos").value.trim() || null, comentario: $("vCom").value.trim() || null
-  };
+  var av = f.visitaId ? null : lerAvaliacao(f);
   var parts = S.grupo.tipo === "pessoal" ? [S.user.id] : f.participantes.slice();
   if (S.grupo.tipo !== "pessoal" && parts.indexOf(f.criadorId) < 0) parts.push(f.criadorId);
   if (parts.length < (S.grupo.tipo === "pessoal" ? 1 : 2)){
@@ -1726,6 +1837,7 @@ function salvarVisita(){
   pVisita.then(function(r){
     if (r.error) throw r.error;
     f.visitaId = r.data.id;
+    if (!av) return { error: null };
     av.visita_id = r.data.id; av.user_id = S.user.id;
     return sb.from("avaliacoes").upsert(av, { onConflict: "visita_id,user_id" });
   }).then(function(r){
@@ -1739,7 +1851,7 @@ function salvarVisita(){
   }).then(function(){
     if (falhas) toast(falhas === 1 ? "Uma foto não foi enviada. Edite o rolê para tentar de novo." : falhas + " fotos não foram enviadas. Edite o rolê para tentar de novo.");
     if (novo){ S.aba = "ja_fomos"; go("#/g/" + S.grupo.id); }
-    else go("#/g/" + S.grupo.id + "/lugar/" + f.lugarId);
+    else go("#/g/" + S.grupo.id + "/role/" + f.lugarId + "/" + f.visitaId);
   }).catch(function(e){
     btn.disabled = false; btn.textContent = "Salvar rolê"; $("fErr").textContent = traduzErro(e);
   });
@@ -1807,6 +1919,10 @@ document.addEventListener("click", function(e){
       if (i >= 0) S.form.atributos.splice(i, 1); else S.form.atributos.push(d.v);
       return marcar(el.parentNode, el, true);
     case "usarLoc": return usarLocalizacao();
+    case "abrirRole": return go("#/g/" + g + "/role/" + d.l + "/" + d.v);
+    case "avaliar": return go("#/g/" + g + "/avaliar/" + d.l + "/" + d.v);
+    case "salvarAvaliacao": return salvarAvaliacao();
+    case "avaliarPend": return go("#/g/" + d.g + "/avaliar/" + d.l + "/" + d.v);
     case "novoNoPessoal":
       var pes = S.grupos.filter(function(x){ return x.tipo === "pessoal"; })[0];
       if (pes) return go("#/g/" + pes.id + "/novo");
