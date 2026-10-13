@@ -1,0 +1,9 @@
+{
+  "appId": "com.beowulfinho.role",
+  "appName": "Rolê",
+  "webDir": "www",
+  "server": {
+    "url": "https://beowulfinho.github.io/Role/",
+    "cleartext": false
+  }
+}
