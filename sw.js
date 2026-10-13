@@ -1,7 +1,7 @@
 /* Rolê: service worker simples. HTML sempre da rede (fica atualizado); cai no cache se estiver offline.
    Estáticos e bibliotecas: usa o cache e atualiza em segundo plano. Dados do Supabase e tiles do mapa nunca passam por aqui. */
-var VERSAO = "role-v2";
-var BASE = ["./", "index.html", "manifest.json", "icon.svg", "icon-180.png", "icon-192.png", "icon-512.png", "icon-maskable-512.png"];
+var VERSAO = "role-v3";
+var BASE = ["./", "index.html", "manifest.json", "icon.svg", "icon-180.png", "icon-192.png", "icon-512.png", "icon-maskable-512.png", "badge-96.png"];
 var CDNS = ["cdnjs.cloudflare.com", "cdn.jsdelivr.net", "fonts.googleapis.com", "fonts.gstatic.com"];
 
 self.addEventListener("install", function(e){
@@ -35,5 +35,32 @@ self.addEventListener("fetch", function(e){
       }).catch(function(){ return hit; });
       return hit || rede;
     });
+  }));
+});
+
+/* ---------- notificações push ---------- */
+self.addEventListener("push", function(e){
+  var d = {};
+  try { d = e.data ? e.data.json() : {}; } catch(x){ d = { titulo: "Rolê", corpo: e.data ? e.data.text() : "" }; }
+  e.waitUntil(self.registration.showNotification(d.titulo || "Rolê", {
+    body: d.corpo || "",
+    icon: "icon-192.png",
+    badge: "badge-96.png",
+    tag: d.id ? "n:" + d.id : (d.tipo || "role"),
+    renotify: false,
+    data: { link: d.link || "#/notificacoes", id: d.id || null }
+  }));
+});
+self.addEventListener("notificationclick", function(e){
+  e.notification.close();
+  var dados = e.notification.data || {}, base = self.registration.scope, link = dados.link || "#/notificacoes";
+  e.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(function(lista){
+    for (var i = 0; i < lista.length; i++){
+      if (lista[i].url.indexOf(base) === 0){
+        lista[i].postMessage({ tipo: "abrir", link: link, id: dados.id });
+        return lista[i].focus();
+      }
+    }
+    return self.clients.openWindow(base + link);
   }));
 });

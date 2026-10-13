@@ -170,6 +170,11 @@
   .chip.fixo{opacity:.92}
   .foto .autor{position:absolute;left:5px;bottom:5px;background:rgba(0,0,0,.6);color:#fff;font-size:11px;font-weight:600;padding:1px 7px;border-radius:9px;max-width:80%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .foto img[data-act]{cursor:pointer}
+  .iconbtn{position:relative}
+  .badge-n{position:absolute;top:-6px;right:-6px;min-width:18px;height:18px;border-radius:9px;background:var(--accent);color:var(--accent-ink);
+    font-size:11px;font-weight:700;align-items:center;justify-content:center;padding:0 4px;border:2px solid var(--bg);box-sizing:content-box}
+  .notif.nova{border-color:var(--accent);background:var(--accent-soft)}
+  .notif-ico{font-size:22px;width:34px;text-align:center;flex:none}
   .rev{border-top:1px solid var(--line);padding-top:10px;margin-top:10px}
   .rev:first-child{border-top:0;padding-top:0;margin-top:0}
 </style>
@@ -209,7 +214,7 @@ function htmlMarca(){
 
 var S = {
   user: null, grupos: [], grupo: null, membros: [], perfis: {}, lugares: [],
-  somenteLeitura: false, amigos: [], sheetAmigos: [], ordem: lsGet("role_ordem") === "data" ? "data" : "nota", authModo: "login", vista: lsGet("role_vista") === "mapa" ? "mapa" : "lista", aba: "ja_fomos", cat: "", busca: "", form: null
+  somenteLeitura: false, naoLidas: 0, canalNotif: null, amigos: [], sheetAmigos: [], ordem: lsGet("role_ordem") === "data" ? "data" : "nota", authModo: "login", vista: lsGet("role_vista") === "mapa" ? "mapa" : "lista", aba: "ja_fomos", cat: "", busca: "", form: null
 };
 
 var app = document.getElementById("app");
@@ -326,6 +331,7 @@ function route(){
   var r = p[0] || "";
   if (r === "publico" && p[1]) return viewPublico(p[1]);
   if (r === "amigos") return viewAmigos();
+  if (r === "notificacoes") return viewNotificacoes();
   if (r === "perfil") return viewPerfil();
   if (r === "u" && p[1]) return viewPerfilPublico(p[1]);
   if (r === "g" && p[1]){
@@ -386,9 +392,9 @@ function fazerAuth(){
 function viewGrupos(){
   var nome = S.perfis[S.user.id] ? S.perfis[S.user.id].nome : (S.user.user_metadata && S.user.user_metadata.full_name) || "";
   var pend = pedidosRecebidos().length;
-  var h = '<div class="top">' + htmlMarca() + '<h1>Seus grupos</h1><button class="iconbtn" data-act="menu" aria-label="Menu" style="position:relative;font-size:20px;line-height:1">⋮' +
+  var h = '<div class="top">' + htmlMarca() + '<h1>Seus grupos</h1><button class="iconbtn" data-act="irNotif" aria-label="Notificações">🔔<span id="badgeNotif" class="badge-n" style="display:none"></span></button><button class="iconbtn" data-act="menu" aria-label="Menu" style="position:relative;font-size:20px;line-height:1">⋮' +
     (pend ? '<span class="dot"></span>' : '') + '</button></div>';
-  h += '<p class="muted" id="saudacao" style="margin-top:0">' + saudacaoHtml() + '</p><div id="pendBox"></div>';
+  h += '<p class="muted" id="saudacao" style="margin-top:0">' + saudacaoHtml() + '</p><div id="convNotif"></div><div id="pendBox"></div>';
   var lista = S.grupos.filter(function(g){ return g.tipo !== "pessoal"; });
   if (!lista.length){
     h += '<div class="empty"><div class="big">👫</div>Crie um grupo para o casal ou os amigos,<br>ou entre com um código de convite.</div>';
@@ -403,6 +409,8 @@ function viewGrupos(){
   app.innerHTML = h;
   atualizarSaudacao();
   carregarPendencias();
+  atualizarBadgeNotif();
+  mostrarConviteNotif();
 }
 
 /* ---------- menu ⋮ e perfil ---------- */
@@ -414,6 +422,7 @@ function abrirMenu(){
   var m = document.createElement("div"); m.id = "menuPop"; m.className = "menu-bg";
   m.innerHTML = '<div class="menu">' +
     item("irPerfil", "👤 Meu perfil") + item("abrirPessoal", "📒 Meu catálogo") +
+    item("irNotif", "🔔 Notificações" + (S.naoLidas ? ' <span class="badge">' + S.naoLidas + '</span>' : '')) +
     item("irAmigos", "👥 Amigos" + (pend ? ' <span class="badge">' + pend + '</span>' : '')) +
     '<hr style="margin:4px 0">' + item("sair", "↪ Sair") + '</div>';
   m.addEventListener("click", function(e){ if (e.target === m) fecharMenu(); });
@@ -741,6 +750,146 @@ function abrirIntegrantes(){
   carregarImagens($("sheet"));
 }
 
+/* ---------- notificações ---------- */
+var NOTIF_ICONES = { amizade_pedido: "👥", amizade_aceita: "🤝", role_adicionado: "🎉", role_lembrete: "⏰", avaliacao_nova: "⭐", grupo_adicionado: "👥", grupo_entrou: "👋", curtida: "❤️" };
+function tempoRelativo(iso){
+  var s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return "agora";
+  if (s < 3600) return "há " + Math.floor(s / 60) + " min";
+  if (s < 86400) return "há " + Math.floor(s / 3600) + " h";
+  if (s < 172800) return "ontem";
+  var d = new Date(iso); return String(d.getDate()).padStart(2, "0") + "/" + String(d.getMonth() + 1).padStart(2, "0");
+}
+function atualizarBadgeNotif(){
+  var n = S.naoLidas || 0, el = $("badgeNotif");
+  if (el){ el.textContent = n > 99 ? "99+" : String(n); el.style.display = n ? "flex" : "none"; }
+  try { if (navigator.setAppBadge){ if (n) navigator.setAppBadge(n); else navigator.clearAppBadge(); } } catch(e){}
+}
+function contarNaoLidas(){
+  return sb.from("notificacoes").select("id", { count: "exact", head: true }).eq("lida", false).then(function(r){
+    if (!r.error){ S.naoLidas = r.count || 0; atualizarBadgeNotif(); }
+  });
+}
+function iniciarNotificacoes(){
+  contarNaoLidas();
+  if (S.canalNotif){ try { sb.removeChannel(S.canalNotif); } catch(e){} S.canalNotif = null; }
+  try {
+    S.canalNotif = sb.channel("notif-" + S.user.id).on("postgres_changes",
+      { event: "INSERT", schema: "public", table: "notificacoes", filter: "user_id=eq." + S.user.id }, function(p){
+        var n = (p && p.new) || {};
+        S.naoLidas = (S.naoLidas || 0) + 1; atualizarBadgeNotif();
+        toast((n.titulo || "Rolê") + ": " + (n.corpo || ""));
+        if (/#\/notificacoes/.test(location.hash)) viewNotificacoes();
+      }).subscribe();
+  } catch(e){}
+}
+
+/* ---- push no aparelho ---- */
+function pushSuportado(){
+  return !!(window.isSecureContext && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window);
+}
+function estadoPush(){
+  if (!pushSuportado()) return Promise.resolve({ suportado: false });
+  return navigator.serviceWorker.getRegistration().then(function(reg){
+    if (!reg) return { suportado: true, permissao: Notification.permission, inscrito: false };
+    return reg.pushManager.getSubscription().then(function(sub){
+      return { suportado: true, permissao: Notification.permission, inscrito: !!sub };
+    });
+  }).catch(function(){ return { suportado: false }; });
+}
+function chaveParaBytes(b64){
+  var s = (b64 + "=".repeat((4 - b64.length % 4) % 4)).replace(/-/g, "+").replace(/_/g, "/"), raw = atob(s), out = new Uint8Array(raw.length);
+  for (var i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+function ativarPush(){
+  if (!pushSuportado()) return Promise.reject(new Error("Este aparelho não recebe notificações push."));
+  return Notification.requestPermission().then(function(perm){
+    if (perm !== "granted") throw new Error("Permissão negada. Libere as notificações nas configurações do site.");
+    return Promise.all([ navigator.serviceWorker.ready, sb.rpc("vapid_publica") ]);
+  }).then(function(rs){
+    var reg = rs[0], chave = rs[1].data;
+    if (rs[1].error || !chave) throw new Error("Não consegui a chave de envio agora. Tente de novo.");
+    return reg.pushManager.getSubscription().then(function(sub){
+      return sub ? sub.unsubscribe().then(function(){ return null; }) : null;      // garante inscrição com a chave atual
+    }).then(function(){ return reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: chaveParaBytes(chave) }); });
+  }).then(function(sub){
+    var j = sub.toJSON();
+    return sb.rpc("salvar_push", { p_endpoint: j.endpoint, p_p256dh: j.keys.p256dh, p_auth: j.keys.auth, p_ua: navigator.userAgent });
+  }).then(function(r){
+    if (r.error) throw r.error;
+    lsSet("role_notif_dispensado", null);
+  });
+}
+function desativarPush(){
+  return navigator.serviceWorker.getRegistration().then(function(reg){
+    return reg ? reg.pushManager.getSubscription() : null;
+  }).then(function(sub){
+    if (!sub) return;
+    var ep = sub.endpoint;
+    return sub.unsubscribe().then(function(){ return sb.rpc("remover_push", { p_endpoint: ep }); });
+  });
+}
+function testarPush(){
+  return navigator.serviceWorker.ready.then(function(reg){
+    return reg.showNotification("Rolê", { body: "Teste: as notificações estão funcionando neste aparelho.", icon: "icon-192.png", badge: "badge-96.png", tag: "teste", data: { link: "#/notificacoes" } });
+  });
+}
+function htmlPushCard(ep){
+  var h = '<div class="card"><div class="title">🔔 Avisos no celular</div>';
+  if (!ep.suportado){
+    return h + '<div class="muted" style="margin-top:6px">Este aparelho ou app não recebe avisos com o Rolê fechado. Para receber, instale o Rolê pelo Chrome (menu ⋮ → Instalar app). Aqui dentro você continua vendo tudo.</div></div>';
+  }
+  if (ep.permissao === "denied"){
+    return h + '<div class="muted" style="margin-top:6px">As notificações estão bloqueadas para este site. Libere nas configurações do navegador (Configurações do site → Notificações) e volte aqui.</div></div>';
+  }
+  if (ep.inscrito && ep.permissao === "granted"){
+    return h + '<div class="muted" style="margin:6px 0 10px">Ativados neste aparelho: você recebe os avisos mesmo com o app fechado.</div>' +
+      '<div class="row" style="gap:8px"><button class="btn sec small" data-act="notifTestar">Enviar teste</button><button class="btn sec small" data-act="notifDesativar">Desativar</button></div></div>';
+  }
+  return h + '<div class="muted" style="margin:6px 0 10px">Receba no celular: rolê em que você foi adicionado, avaliações pendentes, pedidos de amizade e mais.</div>' +
+    '<button class="btn" data-act="notifAtivar">Ativar notificações</button></div>';
+}
+function mostrarConviteNotif(){
+  var box = $("convNotif"); if (!box) return;
+  if (lsGet("role_notif_dispensado")){ box.innerHTML = ""; return; }
+  estadoPush().then(function(ep){
+    var b = $("convNotif"); if (!b) return;
+    if (!ep.suportado || ep.permissao !== "default" || ep.inscrito){ b.innerHTML = ""; return; }
+    b.innerHTML = '<div class="card"><div class="title">🔔 Ative as notificações</div>' +
+      '<div class="muted" style="margin:4px 0 10px">Receba no celular os avisos de rolês, avaliações e amizades.</div>' +
+      '<div class="row" style="gap:8px"><button class="btn small" data-act="notifAtivar">Ativar</button><button class="btn sec small" data-act="notifDispensar">Agora não</button></div></div>';
+  });
+}
+
+/* ---- tela de notificações ---- */
+function viewNotificacoes(){
+  limparMapaGrupo();
+  if (!$("notifLista")) app.innerHTML = '<div class="top"><button class="iconbtn" data-act="irGrupos">‹</button><h1>Notificações</h1></div><p class="empty">Carregando…</p>';
+  Promise.all([ sb.from("notificacoes").select("*").order("created_at", { ascending: false }).limit(60), estadoPush() ]).then(function(rs){
+    if (rs[0].error) throw rs[0].error;
+    var lista = rs[0].data || [], ep = rs[1];
+    var nao = lista.filter(function(n){ return !n.lida; }).length;
+    var h = '<div class="top"><button class="iconbtn" data-act="irGrupos">‹</button><h1>Notificações</h1>' +
+      (nao ? '<button class="iconbtn" data-act="notifTodasLidas">✓ Marcar lidas</button>' : '') + '</div>' + htmlPushCard(ep) +
+      '<h3 style="margin:16px 0 8px">Recentes</h3><div id="notifLista">';
+    if (!lista.length){
+      h += '<div class="empty"><div class="big">🔔</div>Nenhuma notificação ainda.<br>Os avisos de rolês, avaliações e amizades aparecem aqui.</div>';
+    } else {
+      h += lista.map(function(n){
+        return '<div class="card click notif' + (n.lida ? "" : " nova") + '" data-act="abrirNotif" data-id="' + esc(n.id) + '" data-link="' + esc(n.link || "") + '"><div class="row" style="align-items:flex-start">' +
+          '<div class="notif-ico">' + (NOTIF_ICONES[n.tipo] || "🔔") + '</div><div class="grow"><div class="title">' + esc(n.titulo) + '</div>' +
+          '<div class="muted">' + esc(n.corpo) + '</div><div class="faint">' + esc(tempoRelativo(n.created_at)) + '</div></div></div></div>';
+      }).join("");
+    }
+    app.innerHTML = h + '</div>';
+    contarNaoLidas();
+  }).catch(function(e){ toast(traduzErro(e)); go("#/grupos"); });
+}
+function abrirNotificacao(id, link){
+  sb.from("notificacoes").update({ lida: true }).eq("id", id).then(function(){ contarNaoLidas(); });
+  if (link) go(link);
+}
 /* ---------- amigos Rolê ---------- */
 function carregarAmigos(){
   return sb.rpc("listar_amigos").then(function(r){
@@ -1989,6 +2138,16 @@ document.addEventListener("click", function(e){
     case "fotoPrev": S.lb.i = (S.lb.i + S.lb.caminhos.length - 1) % S.lb.caminhos.length; return mostrarFoto();
     case "fotoNext": S.lb.i = (S.lb.i + 1) % S.lb.caminhos.length; return mostrarFoto();
     case "irAmigos": return go("#/amigos");
+    case "irNotif": return go("#/notificacoes");
+    case "abrirNotif": return abrirNotificacao(d.id, d.link);
+    case "notifTodasLidas": return sb.rpc("marcar_todas_lidas").then(function(){ S.naoLidas = 0; atualizarBadgeNotif(); viewNotificacoes(); });
+    case "notifAtivar":
+      return ativarPush().then(function(){ toast("Notificações ativadas."); if (/#\/notificacoes/.test(location.hash)) viewNotificacoes(); else mostrarConviteNotif(); })
+        .catch(function(e){ toast(e && e.message ? e.message : "Não consegui ativar agora."); if (/#\/notificacoes/.test(location.hash)) viewNotificacoes(); else mostrarConviteNotif(); });
+    case "notifDesativar":
+      return desativarPush().then(function(){ toast("Notificações desativadas neste aparelho."); viewNotificacoes(); }).catch(function(e){ toast(traduzErro(e)); });
+    case "notifTestar": return testarPush().catch(function(e){ toast("Não consegui mostrar o teste: " + (e && e.message ? e.message : "")); });
+    case "notifDispensar": lsSet("role_notif_dispensado", "1"); return mostrarConviteNotif();
     case "menu": return abrirMenu();
     case "irPerfil": return go("#/perfil");
     case "abrirPessoal": return abrirPessoal();
@@ -2098,6 +2257,7 @@ function recarregarApp(){ location.reload(); }
 /* ---------- sessão ---------- */
 function iniciar(user){
   S.user = user; S.grupo = null; S._grupoAuto = false;
+  iniciarNotificacoes();
   var conv = lsGet("role_convite");
   var p = sb.rpc("garantir_catalogo_pessoal").then(function(){}, function(){}).then(function(){ return carregarGrupos(); });
   if (conv){
@@ -2131,6 +2291,7 @@ sb.auth.onAuthStateChange(function(evento, session){
     if (session && session.user){
       if (!S.user || S.user.id !== session.user.id) iniciar(session.user);
     } else {
+      if (S.canalNotif){ try { sb.removeChannel(S.canalNotif); } catch(e){} S.canalNotif = null; } S.naoLidas = 0; try { if (navigator.clearAppBadge) navigator.clearAppBadge(); } catch(e){}
       S.user = null; S.grupo = null; S.somenteLeitura = false; S.amigos = []; S.grupos = []; S.lugares = [];
       location.hash = ""; viewAuth();
     }
@@ -2138,6 +2299,15 @@ sb.auth.onAuthStateChange(function(evento, session){
 });
 sb.auth.getSession().then(function(r){ if (!r.data.session) viewAuth(); });
 
+document.addEventListener("visibilitychange", function(){ if (document.visibilityState === "visible" && S.user) contarNaoLidas(); });
+if ("serviceWorker" in navigator){
+  navigator.serviceWorker.addEventListener("message", function(e){
+    var m = e.data || {};
+    if (m.tipo !== "abrir" || !S.user) return;
+    if (m.id) sb.from("notificacoes").update({ lida: true }).eq("id", m.id).then(function(){ contarNaoLidas(); });
+    if (m.link) go(m.link);
+  });
+}
 if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")){
   window.addEventListener("load", function(){ navigator.serviceWorker.register("sw.js").catch(function(){}); });
 }
