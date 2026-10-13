@@ -160,6 +160,12 @@
   .barra{height:8px;border-radius:999px;background:var(--line);overflow:hidden;margin:10px 0 6px}
   .barra span{display:block;height:100%;background:var(--accent);border-radius:999px}
   .chip.react{font-size:15px;padding:8px 16px}
+  .qr{display:inline-block;width:min(62vw,230px);height:auto;background:#fff;padding:10px;border-radius:14px;image-rendering:pixelated;border:1px solid var(--line)}
+  #scan{background:#000}
+  #scan video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+  .scan-quadro{position:relative;width:min(68vw,280px);aspect-ratio:1;border:3px solid #fff;border-radius:22px;box-shadow:0 0 0 100vmax rgba(0,0,0,.5)}
+  .lb img.lb-avatar{width:min(92vw,520px);height:auto;max-height:80vh;border-radius:22px;object-fit:cover}
+  .avatar.click{cursor:pointer}
   .rev{border-top:1px solid var(--line);padding-top:10px;margin-top:10px}
   .rev:first-child{border-top:0;padding-top:0;margin-top:0}
 </style>
@@ -287,7 +293,7 @@ function carregarGrupo(id){
   return Promise.all([
     sb.from("lugares").select("*, locais(*), visitas(*, avaliacoes(*), fotos(*))").eq("grupo_id", id).order("created_at",{ascending:false}),
     sb.from("grupo_membros").select("user_id,papel").eq("grupo_id", id),
-    sb.from("perfis").select("id,nome")
+    sb.from("perfis").select("id,nome,avatar_url")
   ]).then(function(rs){
     rs.forEach(function(r){ if (r.error) throw r.error; });
     S.lugares = (rs[0].data || []).map(function(l){
@@ -412,10 +418,11 @@ function abrirPessoal(){
 /* ---------- perfil, nível e perfil público ---------- */
 var NIVEIS = ["Curioso", "Passeador", "Explorador", "Rolezeiro", "Gourmet", "Descobridor", "Mestre do rolê", "Lenda local", "Embaixador", "Rei do rolê"];
 function nomeNivel(n){ return NIVEIS[Math.max(1, Math.min(10, n)) - 1]; }
-function htmlAvatar(p, tam){
+function htmlAvatar(p, tam, ampliar){
   var ini = (((p && p.nome) || "?").trim().charAt(0) || "?").toUpperCase();
   var estilo = tam ? ' style="width:' + tam + 'px;height:' + tam + 'px;font-size:' + Math.round(tam * 0.45) + 'px"' : "";
-  return '<div class="avatar"' + estilo + '>' + (p && p.avatar_url ? '<img data-path="' + esc(p.avatar_url) + '" data-bucket="avatares" alt="">' : esc(ini)) + '</div>';
+  var amp = (ampliar && p && p.avatar_url) ? ' data-act="abrirAvatar" data-path="' + esc(p.avatar_url) + '" role="button" aria-label="Ver foto"' : "";
+  return '<div class="avatar' + (amp ? " click" : "") + '"' + amp + estilo + '>' + (p && p.avatar_url ? '<img data-path="' + esc(p.avatar_url) + '" data-bucket="avatares" alt="">' : esc(ini)) + '</div>';
 }
 function htmlBarraNivel(p){
   var h = '<div class="nivel-card"><div class="row"><div class="grow"><div class="title">⭐ Nível ' + p.nivel + ' · ' + esc(nomeNivel(p.nivel)) + '</div>' +
@@ -437,7 +444,7 @@ function viewPerfil(){
     S.perfis[S.user.id] = { id: p.id, nome: p.nome, avatar_url: p.avatar_url, cidade: p.cidade, bairro: p.bairro };
     S.meuPerfil = p;
     app.innerHTML = '<div class="top"><button class="iconbtn" data-act="irGrupos">‹</button><h1>Meu perfil</h1></div>' +
-      '<div class="center" style="margin:6px 0 4px">' + htmlAvatar(p, 92) + '</div>' +
+      '<div class="center" style="margin:6px 0 4px">' + htmlAvatar(p, 92, true) + '</div>' +
       '<div class="center" style="margin-bottom:14px"><button class="btn sec small" data-act="pFoto">📷 ' + (p.avatar_url ? "Trocar foto" : "Adicionar foto") + '</button>' +
         '<input type="file" id="pFotoIn" accept="image/*" hidden></div>' +
       htmlBarraNivel(p) +
@@ -522,7 +529,7 @@ function viewPerfilPublico(id){
     if (!p){ toast("Perfil não encontrado."); return go("#/grupos"); }
     var eu = p.id === S.user.id;
     var h = '<div class="top"><button class="iconbtn" data-act="voltar">‹</button><h1>' + (eu ? "Meu perfil público" : "Perfil") + '</h1></div>' +
-      '<div class="center" style="margin:6px 0 8px">' + htmlAvatar(p, 92) + '</div>' +
+      '<div class="center" style="margin:6px 0 8px">' + htmlAvatar(p, 92, true) + '</div>' +
       '<div class="center"><div class="title" style="font-size:20px">' + esc(p.nome || "Alguém") + '</div>' +
         (localPerfil(p) ? '<div class="muted">📍 ' + esc(localPerfil(p)) + '</div>' : '') +
         '<div style="margin-top:8px"><span class="nivel">⭐ Nível ' + p.nivel + ' · ' + esc(nomeNivel(p.nivel)) + ' · ' + p.pontos + ' pts</span></div></div>' +
@@ -630,6 +637,98 @@ function entrarGrupo(codigo, silencioso){
   });
 }
 
+/* ---------- QR code de amizade ---------- */
+var scriptsCarregados = {}, URL_QRGEN = "https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js", URL_JSQR = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js";
+function carregarScript(url){
+  if (scriptsCarregados[url]) return scriptsCarregados[url];
+  scriptsCarregados[url] = new Promise(function(res, rej){
+    var sc = document.createElement("script"); sc.src = url; sc.onload = function(){ res(); };
+    sc.onerror = function(){ delete scriptsCarregados[url]; rej(new Error("Não consegui carregar o leitor de QR code agora.")); };
+    document.head.appendChild(sc);
+  });
+  return scriptsCarregados[url];
+}
+function desenharQr(texto){
+  var box = $("qrBox"); if (!box) return;
+  carregarScript(URL_QRGEN).then(function(){
+    var qr = qrcode(0, "M"); qr.addData(texto); qr.make();
+    if ($("qrBox")) $("qrBox").innerHTML = '<img class="qr" alt="QR code do seu convite de amizade" src="' + qr.createDataURL(6, 2) + '">';
+  }).catch(function(){ if ($("qrBox")) $("qrBox").innerHTML = '<div class="faint">Não consegui gerar o QR code agora.</div>'; });
+}
+var scan = null;
+function extrairCodigoAmigo(txt){
+  txt = String(txt || "").trim();
+  try { var u = new URL(txt), c = u.searchParams.get("amigo"); if (c && /^[A-Za-z0-9]{6,12}$/.test(c)) return c.toUpperCase(); } catch(e){}
+  return /^[A-Za-z0-9]{6,12}$/.test(txt) ? txt.toUpperCase() : null;
+}
+function abrirScanner(){
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ toast("A câmera não está disponível neste aparelho."); return; }
+  fecharScanner();
+  var bg = document.createElement("div"); bg.className = "lb"; bg.id = "scan";
+  bg.innerHTML = '<video id="scanVideo" playsinline muted></video><div class="scan-quadro"></div>' +
+    '<button class="lbx" data-act="scanFechar" aria-label="Fechar">×</button><div class="lbc" id="scanMsg">Aponte a câmera para o QR code do seu amigo</div>';
+  document.body.appendChild(bg);
+  var st = scan = { parar: false, stream: null };
+  Promise.all([ carregarScript(URL_JSQR), navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false }) ]).then(function(r){
+    if (st.parar){ r[1].getTracks().forEach(function(t){ t.stop(); }); return; }
+    st.stream = r[1];
+    var v = $("scanVideo"); v.srcObject = r[1];
+    return v.play().then(function(){ lerQuadroQr(st); });
+  }).catch(function(e){
+    fecharScanner();
+    toast(e && /NotAllowed|Permission|denied/i.test((e.name || "") + (e.message || "")) ? "Permita o acesso à câmera para escanear." : ((e && e.message) || "Não consegui abrir a câmera."));
+  });
+}
+function lerQuadroQr(st){
+  if (st.parar) return;
+  var v = $("scanVideo"); if (!v) return;
+  if (v.videoWidth){
+    var k = Math.min(1, 480 / v.videoWidth), w = Math.round(v.videoWidth * k), h = Math.round(v.videoHeight * k);
+    var c = st.canvas || (st.canvas = document.createElement("canvas")); c.width = w; c.height = h;
+    var g = c.getContext("2d", { willReadFrequently: true }); g.drawImage(v, 0, 0, w, h);
+    var q = window.jsQR && jsQR(g.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: "dontInvert" });
+    if (q && q.data){
+      var cod = extrairCodigoAmigo(q.data);
+      if (cod){ fecharScanner(); adicionarPorCodigo(cod); return; }
+      var m = $("scanMsg"); if (m) m.textContent = "Esse QR code não é de um amigo do Rolê.";
+    }
+  }
+  setTimeout(function(){ lerQuadroQr(st); }, 120);
+}
+function fecharScanner(){
+  if (scan){ scan.parar = true; if (scan.stream) scan.stream.getTracks().forEach(function(t){ t.stop(); }); scan = null; }
+  var b = $("scan"); if (b) b.remove();
+}
+function adicionarPorCodigo(cod){
+  return sb.rpc("adicionar_amigo", { p_codigo: cod }).then(function(r){
+    toast(r.error ? (/proprio/.test(r.error.message) ? "Esse é o seu próprio código." : "Código de amigo inválido.")
+      : r.data === "pendente" ? "Pedido de amizade enviado." : "Agora vocês são amigos no Rolê!");
+    return carregarAmigos().then(function(){ if (/#\/amigos/.test(location.hash)) renderAmigos(); }, function(){});
+  });
+}
+function abrirAvatar(path){
+  fecharFoto();
+  var bg = document.createElement("div"); bg.className = "lb"; bg.id = "lb";
+  bg.innerHTML = '<img id="lbImg" class="lb-avatar" alt="Foto de perfil"><button class="lbx" data-act="fotoFechar" aria-label="Fechar">×</button>';
+  bg.addEventListener("click", function(e){ if (e.target === bg) fecharFoto(); });
+  document.body.appendChild(bg);
+  urlsAssinadas([path], "avatares").then(function(m){ if ($("lbImg") && m[path]) $("lbImg").src = m[path]; }).catch(function(){});
+}
+function abrirIntegrantes(){
+  var g = S.grupo;
+  var lista = S.membros.slice().sort(function(a, b){
+    if (a.papel !== b.papel) return a.papel === "admin" ? -1 : 1;
+    return nomeDe(a.user_id).localeCompare(nomeDe(b.user_id));
+  });
+  abrirSheet('<h2 style="margin-bottom:10px">Integrantes (' + lista.length + ')</h2>' + lista.map(function(m){
+    var p = S.perfis[m.user_id] || { nome: "Alguém" };
+    return '<div class="card click" data-act="abrirPerfil" data-u="' + esc(m.user_id) + '"><div class="row">' + htmlAvatar(p, 42) +
+      '<div class="grow"><div class="title">' + esc(p.nome || "Alguém") + (m.user_id === S.user.id ? ' <span class="faint">(você)</span>' : '') + '</div>' +
+      '<div class="faint">' + (m.papel === "admin" ? "Criador do grupo" : "Integrante") + '</div></div><span>›</span></div></div>';
+  }).join("") + '<div class="stack" style="margin-top:6px"><button class="btn" data-act="convidar">Convidar mais gente</button></div>');
+  carregarImagens($("sheet"));
+}
+
 /* ---------- amigos Rolê ---------- */
 function carregarAmigos(){
   return sb.rpc("listar_amigos").then(function(r){
@@ -655,10 +754,12 @@ function renderAmigos(){
     return '<div class="card"><div class="row"><div class="grow click" data-act="abrirPerfil" data-u="' + esc(a.user_id) + '"><div class="title">' + esc(a.nome || "Alguém") + ' ›</div></div>' + botoes + '</div></div>';
   };
   var h = '<div class="top"><button class="iconbtn" data-act="irGrupos">‹</button><h1>Amigos</h1></div>' +
-    '<div class="card"><div class="faint">Seu código de amigo</div><div class="code" style="margin:6px 0">' + esc(S.codigoAmigo) + '</div>' +
+    '<div class="card center"><div class="faint">Seu código de amigo</div><div class="code" style="margin:6px 0">' + esc(S.codigoAmigo) + '</div>' +
+    '<div id="qrBox" style="margin:10px 0;min-height:60px"></div><div class="faint" style="margin-bottom:12px">Seu amigo pode escanear este QR code</div>' +
     '<div class="stack"><a class="btn" style="text-decoration:none;text-align:center" target="_blank" rel="noopener" href="https://wa.me/?text=' +
       encodeURIComponent("Me adiciona como amigo no Rolê! Meu código: " + S.codigoAmigo + "\n" + link) + '">Enviar pelo WhatsApp</a>' +
     '<button class="btn sec" data-act="copiarLinkAmigo">Copiar link</button></div></div>' +
+    '<button class="btn" style="margin-top:12px" data-act="scanAbrir">📷 Escanear QR code de um amigo</button>' +
     '<h3 style="margin:16px 0 8px">Adicionar amigo</h3>' +
     '<div class="row"><input type="text" id="amCod" class="grow" maxlength="8" autocapitalize="characters" placeholder="Código do amigo" style="flex:1">' +
     '<button class="btn small" data-act="adicionarAmigo">Adicionar</button></div><div class="err" id="amErr"></div>';
@@ -677,6 +778,7 @@ function renderAmigos(){
     return linha(a, '<button class="btn sec small" data-act="removerAmigo" data-u="' + esc(a.user_id) + '" data-n="' + esc(a.nome || "") + '">Remover</button>');
   }).join("") : '<div class="empty" style="padding:18px 0">Nenhum amigo ainda.<br>Compartilhe seu código ou peça o de um amigo.</div>');
   app.innerHTML = h;
+  desenharQr(link);
 }
 function adicionarAmigo(){
   var cod = ($("amCod").value || "").trim(), err = $("amErr");
@@ -737,8 +839,9 @@ function viewLista(){
   limparMapaGrupo();
   var g = S.grupo;
   var h = '<div class="top"><button class="iconbtn" data-act="irGrupos" aria-label="Grupos">‹</button><h1>' + esc(g.nome) + '</h1>' +
+    (S.somenteLeitura || S.grupo.tipo === "pessoal" ? '' : '<button class="iconbtn" data-act="integrantes" aria-label="Integrantes">👥 ' + S.membros.length + '</button>') +
     '<button class="iconbtn" data-act="vista">' + (S.vista === "mapa" ? "☰ Lista" : "🗺️ Mapa") + '</button>' +
-    (S.somenteLeitura ? '<span class="tag">Público</span>' : '<button class="iconbtn" data-act="convidar">' + (S.grupo.tipo === "pessoal" ? "Compartilhar" : "Convidar") + '</button>') + '</div>' +
+    (S.somenteLeitura ? '<span class="tag">Público</span>' : S.grupo.tipo === "pessoal" ? '<button class="iconbtn" data-act="convidar">Compartilhar</button>' : "") + '</div>' +
     (S.somenteLeitura ? '<div id="apoioBox"></div>' : '') +
     '<div class="tabs" style="margin-bottom:12px">' +
       '<button data-act="aba" data-v="ja_fomos" class="' + (S.aba === "ja_fomos" ? "on" : "") + '">Já fomos</button>' +
@@ -1680,7 +1783,11 @@ document.addEventListener("click", function(e){
     case "salvarPerfil": return salvarPerfil();
     case "pFoto": return $("pFotoIn").click();
     case "pLoc": return perfilUsarLocalizacao();
-    case "abrirPerfil": return go("#/u/" + d.u);
+    case "abrirPerfil": fecharSheet(); return go("#/u/" + d.u);
+    case "abrirAvatar": return abrirAvatar(d.path);
+    case "integrantes": return abrirIntegrantes();
+    case "scanAbrir": return abrirScanner();
+    case "scanFechar": return fecharScanner();
     case "abrirPublico": return go("#/publico/" + d.id);
     case "reagir": return reagir(d.t);
     case "copiarLinkAmigo":
@@ -1725,7 +1832,7 @@ function recarregarApp(){ location.reload(); }
   function bloqueado(alvo){
     if (carregando) return true;
     if ((window.scrollY || 0) > 0 || (document.scrollingElement && document.scrollingElement.scrollTop > 0)) return true;
-    if ($("sheet") || $("lb") || $("menuPop")) return true;
+    if ($("sheet") || $("lb") || $("menuPop") || $("scan")) return true;
     if (/\/(novo|editar|visita)(\/|$)/.test(location.hash)) return true;   // não perder o que está sendo digitado
     var a = document.activeElement;
     if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return true;
