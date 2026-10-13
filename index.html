@@ -208,10 +208,12 @@ function traduzErro(e){
   return m;
 }
 function mapsUrl(l){
-  if (l.maps_url && /^https?:\/\//i.test(l.maps_url)) return l.maps_url;
-  if (l.lat != null && l.lng != null) return "https://www.google.com/maps/search/?api=1&query=" + l.lat + "," + l.lng;
-  var q = [l.nome, l.bairro, l.cidade].filter(Boolean).join(" ");
-  return "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(q);
+  // busca pelo nome + endereço (abre a ficha do local no Maps); coordenadas só se não houver nenhum dado de endereço
+  var base = "https://www.google.com/maps/search/?api=1&query=";
+  var partes = [l.nome, fmtEnd(l), l.bairro, l.cidade].filter(Boolean);
+  if (fmtEnd(l) || l.bairro || l.cidade) return base + encodeURIComponent(partes.join(", "));
+  if (l.lat != null && l.lng != null) return base + encodeURIComponent(l.nome + " ") + l.lat + "," + l.lng;
+  return base + encodeURIComponent(l.nome || "");
 }
 
 /* ---------- estatísticas ---------- */
