@@ -91,7 +91,7 @@
   .notarow .score{min-width:64px;height:64px;font-size:28px}
   input[type=range]{width:100%;accent-color:var(--accent)}
   .sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:20;display:flex;align-items:flex-end;justify-content:center}
-  .sheet{background:var(--bg);border-radius:22px 22px 0 0;padding:20px 16px calc(20px + env(safe-area-inset-bottom));width:100%;max-width:560px}
+  .sheet{max-height:90vh;overflow-y:auto;background:var(--bg);border-radius:22px 22px 0 0;padding:20px 16px calc(20px + env(safe-area-inset-bottom));width:100%;max-width:560px}
   .code{font-family:"Bricolage Grotesque",sans-serif;font-size:34px;letter-spacing:.18em;font-weight:700;text-align:center;margin:10px 0}
   .toast{position:fixed;left:50%;bottom:calc(90px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--ink);color:var(--bg);
     padding:10px 16px;border-radius:12px;font-size:14px;z-index:30;max-width:90%}
@@ -154,7 +154,7 @@ var ATR = {}; ATRIBUTOS.forEach(function(a){ ATR[a[0]] = a[1]; });
 
 var S = {
   user: null, grupos: [], grupo: null, membros: [], perfis: {}, lugares: [],
-  admin: false, admBusca: "", admFiltro: "", authModo: "login", vista: lsGet("role_vista") === "mapa" ? "mapa" : "lista", aba: "ja_fomos", cat: "", busca: "", form: null
+  somenteLeitura: false, authModo: "login", vista: lsGet("role_vista") === "mapa" ? "mapa" : "lista", aba: "ja_fomos", cat: "", busca: "", form: null
 };
 
 var app = document.getElementById("app");
@@ -202,6 +202,7 @@ function mapsUrl(l){
 
 /* ---------- estatísticas ---------- */
 function stats(l){
+  if (l._stats) return l._stats;
   var vis = l.visitas || [];
   var avs = []; vis.forEach(function(v){ (v.avaliacoes||[]).forEach(function(a){ avs.push(a); }); });
   var gpp = vis.filter(function(v){ return v.gasto_total != null && v.num_pessoas; })
@@ -221,18 +222,18 @@ function stats(l){
 
 /* ---------- dados ---------- */
 function carregarGrupos(){
-  return sb.from("grupo_membros").select("papel, grupos(id,nome,tipo,codigo_convite)").eq("user_id", S.user.id)
+  return sb.from("grupo_membros").select("papel, grupos(id,nome,tipo,codigo_convite,publico)").eq("user_id", S.user.id)
     .then(function(r){
       if (r.error) throw r.error;
       S.grupos = (r.data||[]).filter(function(x){ return x.grupos; }).map(function(x){
-        return { id:x.grupos.id, nome:x.grupos.nome, tipo:x.grupos.tipo, codigo:x.grupos.codigo_convite, papel:x.papel };
+        return { id:x.grupos.id, nome:x.grupos.nome, tipo:x.grupos.tipo, codigo:x.grupos.codigo_convite, papel:x.papel, publico: !!x.grupos.publico };
       });
     });
 }
 function carregarGrupo(id){
   var g = S.grupos.filter(function(x){ return x.id === id; })[0];
   if (!g) return Promise.reject(new Error("Grupo não encontrado"));
-  S.grupo = g;
+  S.grupo = g; S.somenteLeitura = false;
   return Promise.all([
     sb.from("lugares").select("*, locais(*), visitas(*, avaliacoes(*))").eq("grupo_id", id).order("created_at",{ascending:false}),
     sb.from("grupo_membros").select("user_id,papel").eq("grupo_id", id),
@@ -258,13 +259,10 @@ function route(){
   if (!S.user) return viewAuth();
   var p = (location.hash || "").replace(/^#\/?/, "").split("/");
   var r = p[0] || "";
-  if (r === "admin"){
-    if (p[1] === "local" && p[2]) return viewAdminLocal(p[2]);
-    return viewAdmin();
-  }
+  if (r === "publico" && p[1]) return viewPublico(p[1]);
   if (r === "g" && p[1]){
     var gid = p[1];
-    var pronto = (S.grupo && S.grupo.id === gid) ? Promise.resolve() : (app.innerHTML = '<p class="empty">Carregando…</p>', carregarGrupo(gid));
+    var pronto = (S.grupo && S.grupo.id === gid && !S.somenteLeitura) ? Promise.resolve() : (app.innerHTML = '<p class="empty">Carregando…</p>', carregarGrupo(gid));
     pronto.then(function(){
       lsSet("role_grupo", gid);
       var sub = p[2] || "";
@@ -327,8 +325,7 @@ function viewGrupos(){
   });
   h += '<hr><div class="stack">' +
     '<button class="btn" data-act="sheetCriar">Criar grupo</button>' +
-    '<button class="btn sec" data-act="sheetEntrar">Entrar com código</button>' +
-    (S.admin ? '<button class="btn sec" data-act="admin">🛠️ Catálogo (admin)</button>' : '') + '</div>';
+    '<button class="btn sec" data-act="sheetEntrar">Entrar com código</button></div>';
   app.innerHTML = h;
   if (S.grupos.length === 1 && !S._grupoAuto){ S._grupoAuto = true; go("#/g/" + S.grupos[0].id); }
 }
@@ -382,14 +379,14 @@ function viewLista(){
   var g = S.grupo;
   var h = '<div class="top"><button class="iconbtn" data-act="irGrupos" aria-label="Grupos">‹</button><h1>' + esc(g.nome) + '</h1>' +
     '<button class="iconbtn" data-act="vista">' + (S.vista === "mapa" ? "☰ Lista" : "🗺️ Mapa") + '</button>' +
-    '<button class="iconbtn" data-act="convidar">Convidar</button></div>' +
+    (S.somenteLeitura ? '<span class="tag">Público</span>' : '<button class="iconbtn" data-act="convidar">Convidar</button>') + '</div>' +
     '<div class="tabs" style="margin-bottom:12px">' +
       '<button data-act="aba" data-v="ja_fomos" class="' + (S.aba === "ja_fomos" ? "on" : "") + '">Já fomos</button>' +
       '<button data-act="aba" data-v="quero_ir" class="' + (S.aba === "quero_ir" ? "on" : "") + '">Quero ir</button></div>' +
     '<input type="text" id="busca" placeholder="Buscar lugar…" value="' + esc(S.busca) + '" style="margin-bottom:10px">' +
     '<div class="chips scroll" id="catChips" style="margin-bottom:12px"></div>' +
     '<div id="cards"></div>' +
-    '<button class="fab" data-act="novoLugar">+ Lugar</button>';
+    (S.somenteLeitura ? '' : '<button class="fab" data-act="novoLugar">+ Lugar</button>');
   app.innerHTML = h;
   $("busca").addEventListener("input", function(e){ S.busca = e.target.value; renderCards(); });
   renderCards();
@@ -425,7 +422,7 @@ function renderCards(){
   });
   if (!lista.length){
     h = '<div class="empty"><div class="big">' + (S.aba === "ja_fomos" ? "🍽️" : "✨") + '</div>' +
-      (S.lugares.length ? "Nada por aqui com esses filtros." : "Nenhum lugar ainda.<br>Toque em <b>+ Lugar</b> para começar.") + '</div>';
+      (S.lugares.length ? "Nada por aqui com esses filtros." : S.somenteLeitura ? "Este catálogo ainda não tem lugares." : "Nenhum lugar ainda.<br>Toque em <b>+ Lugar</b> para começar.") + '</div>';
   }
   $("cards").innerHTML = h;
 }
@@ -465,7 +462,7 @@ function popupLugar(l, st){
     (l.estado === "ja_fomos" ? " · nota " + fmtNota(st.media) : " · quero ir") + "</div>";
   var b = document.createElement("button");
   b.className = "btn small"; b.textContent = "Abrir";
-  b.addEventListener("click", function(){ go("#/g/" + S.grupo.id + "/lugar/" + l.id); });
+  b.addEventListener("click", function(){ if (S.somenteLeitura) sheetLugarPublico(l.id); else go("#/g/" + S.grupo.id + "/lugar/" + l.id); });
   box.appendChild(b);
   return box;
 }
@@ -495,7 +492,7 @@ function renderMapa(lista){
   else if (comLoc.length > 1) S.mapaG.fitBounds(L.latLngBounds(comLoc.map(function(x){ return [x.l.lat, x.l.lng]; })), { padding: [40, 40], maxZoom: 17 });
   var sem = lista.length - comLoc.length;
   $("mapaInfo").textContent = comLoc.length + (comLoc.length === 1 ? " lugar no mapa" : " lugares no mapa") +
-    (sem ? " · " + sem + " sem localização (edite o lugar para marcar)" : "");
+    (sem ? " · " + sem + " sem localização" + (S.somenteLeitura ? "" : " (edite o lugar para marcar)") : "");
 }
 function mapaOndeEstou(){
   pedirLocalizacao(function(){
@@ -507,6 +504,66 @@ function mapaOndeEstou(){
   });
 }
 
+/* ---------- catálogo público (somente leitura) ---------- */
+function viewPublico(id){
+  var meu = S.grupos.filter(function(g){ return g.id === id; })[0];
+  if (meu) return go("#/g/" + id);
+  app.innerHTML = '<p class="empty">Carregando…</p>';
+  Promise.all([ sb.rpc("grupo_publico_info", { p_id: id }), sb.rpc("catalogo_publico", { p_grupo: id }) ]).then(function(rs){
+    if (rs[0].error) throw rs[0].error;
+    if (rs[1].error) throw rs[1].error;
+    var info = (rs[0].data || [])[0];
+    if (!info){ toast("Este catálogo é privado ou não existe."); return go("#/grupos"); }
+    S.somenteLeitura = true;
+    S.grupo = { id: info.id, nome: info.nome, tipo: info.tipo };
+    S.membros = []; S.perfis = {};
+    S.lugares = (rs[1].data || []).map(function(r){
+      return { id: r.id, nome: r.nome, categoria: r.categoria, bairro: r.bairro, cidade: r.cidade, endereco: r.endereco, numero: r.numero,
+        lat: r.lat, lng: r.lng, estado: r.estado, atributos: r.atributos || [], visitas: [],
+        _stats: { nVisitas: r.n_visitas, media: r.nota_media == null ? null : Number(r.nota_media), cb: null, gastoPP: null, voltam: 0, voltamTotal: 0, nunca: false } };
+    });
+    S.aba = "ja_fomos"; S.cat = ""; S.busca = "";
+    viewLista();
+  }).catch(function(e){ toast(traduzErro(e)); go("#/grupos"); });
+}
+function sheetLugarPublico(id){
+  var l = lugarPorId(id); if (!l) return;
+  var s = stats(l), c = CAT[l.categoria] || CAT.outro;
+  abrirSheet('<h2 style="margin-bottom:4px">' + esc(l.nome) + '</h2>' +
+    '<div class="muted">' + resumoLocal(l) + '</div>' +
+    (fmtEnd(l) ? '<div class="muted">' + esc(fmtEnd(l)) + '</div>' : '') +
+    '<div class="row" style="margin:14px 0"><div class="score ' + (l.estado === "ja_fomos" ? notaClasse(s.media) : "none") + '">' + (l.estado === "ja_fomos" ? fmtNota(s.media) : "☆") + '</div>' +
+    '<div class="grow">' + (l.estado === "ja_fomos" ? "Nota média" + (s.nVisitas ? " · " + s.nVisitas + (s.nVisitas === 1 ? " visita" : " visitas") : "") : "Querem ir") + '</div></div>' +
+    ((l.atributos || []).length ? '<div>' + l.atributos.map(function(a){ return '<span class="tag">' + esc(ATR[a] || a) + '</span>'; }).join("") + '</div>' : '') +
+    '<div class="stack" style="margin-top:12px"><a class="btn" style="text-decoration:none;text-align:center" target="_blank" rel="noopener" href="' + esc(mapsUrl(l)) + '">Abrir no Maps</a></div>');
+}
+function mudarVisibilidade(v){
+  var g = S.grupo, publico = v === "publico";
+  sb.from("grupos").update({ publico: publico }).eq("id", g.id).select().then(function(r){
+    if (r.error || !r.data || !r.data.length){ toast(r.error ? traduzErro(r.error) : "Só quem criou o grupo pode mudar isso."); return; }
+    g.publico = publico;
+    convidar();
+  });
+}
+
+function secaoCatalogo(g){
+  var h = '<hr style="margin:18px 0 14px"><h3 style="margin-bottom:6px">Catálogo do grupo</h3>' +
+    '<p class="muted" style="margin-top:0">Privado: só quem está no grupo vê. Público: qualquer pessoa com conta e o link vê a lista, o mapa e a nota média (sem comentários nem gastos).</p>';
+  if (g.papel === "admin"){
+    h += '<div class="chips"><button class="chip ' + (!g.publico ? "on" : "") + '" data-act="catalogoVis" data-v="privado">🔒 Privado</button>' +
+      '<button class="chip ' + (g.publico ? "on" : "") + '" data-act="catalogoVis" data-v="publico">🌐 Público</button></div>';
+  } else {
+    h += '<div class="faint">Hoje o catálogo é ' + (g.publico ? "público" : "privado") + '. Só quem criou o grupo pode mudar.</div>';
+  }
+  if (g.publico){
+    var link = location.origin + location.pathname + "?publico=" + encodeURIComponent(g.id);
+    S.linkPublico = link;
+    h += '<div class="stack" style="margin-top:12px"><button class="btn sec" data-act="copiarPublico">Copiar link público</button>' +
+      '<a class="btn sec" style="text-decoration:none;text-align:center" target="_blank" rel="noopener" href="https://wa.me/?text=' +
+      encodeURIComponent("Veja o nosso catálogo de lugares no Rolê: " + link) + '">Enviar link pelo WhatsApp</a></div>';
+  }
+  return h;
+}
 function convidar(){
   var g = S.grupo;
   var link = location.origin + location.pathname + "?codigo=" + encodeURIComponent(g.codigo);
@@ -514,7 +571,7 @@ function convidar(){
   abrirSheet('<h2>Convidar para ' + esc(g.nome) + '</h2><div class="code">' + esc(g.codigo) + '</div>' +
     '<p class="muted center" style="margin-top:0">Quem entrar com esse código vê todos os lugares do grupo.</p>' +
     '<div class="stack"><a class="btn" style="text-decoration:none;text-align:center" target="_blank" rel="noopener" href="https://wa.me/?text=' + encodeURIComponent(S.convite.texto) + '">Enviar pelo WhatsApp</a>' +
-    '<button class="btn sec" data-act="copiarConvite">Copiar convite</button></div>');
+    '<button class="btn sec" data-act="copiarConvite">Copiar convite</button></div>' + secaoCatalogo(g));
 }
 
 /* ---------- detalhe do lugar ---------- */
@@ -657,12 +714,11 @@ function viewFormLugar(id){
   if (id && !l) return go("#/g/" + S.grupo.id);
   if (l){
     S.form = { modo: "editar", id: id, localId: l.local_id, nome: l.nome, categoria: l.categoria, bairro: l.bairro || "",
-      cidade: l.cidade || "", endereco: l.endereco || "", numero: l.numero || "", geoQuery: queryEnd(l.endereco, l.numero), lat: l.lat, lng: l.lng, precisao: l.precisao,
-      estado: l.estado, atributos: (l.atributos || []).slice(), maps: l.maps_url || "", privado: !!l.privado,
-      editavelLocal: l.local_criado_por === S.user.id || S.admin };
+      cidade: l.cidade || "", endereco: l.endereco || "", numero: l.numero || "", geoQuery: queryEnd(l.endereco, l.numero),
+      lat: l.lat, lng: l.lng, precisao: l.precisao, estado: l.estado, atributos: (l.atributos || []).slice() };
   } else {
     S.form = { modo: "busca", nome: "", categoria: "restaurante", bairro: "", cidade: "", endereco: "", numero: "", geoQuery: "",
-      lat: null, lng: null, precisao: "desconhecida", estado: "ja_fomos", atributos: [], maps: "", privado: false, sugs: [] };
+      lat: null, lng: null, precisao: "desconhecida", estado: "ja_fomos", atributos: [], sugs: [] };
   }
   renderForm();
   if (!l) pedirLocalizacao(function(){ buscarLocais(); });
@@ -692,15 +748,6 @@ function htmlCamposLocal(f){
       '<div class="row" style="margin-top:8px"><span class="faint grow" id="mapStatus"></span><button class="btn sec small" data-act="usarLoc">📍 Minha localização</button></div>' +
       '<div class="faint" id="mapHint">Ao digitar a rua e o número, o local aparece no mapa. Você pode arrastar o pin para ajustar.</div></div>';
 }
-function htmlMaisOpcoes(f, comLocal, semMaps){
-  var h = '<details id="maisOp" class="mais"><summary>Mais opções</summary><div class="stack" style="margin-top:12px">' +
-    (semMaps ? '' : '<div><label class="f" for="fMaps">Link do Google Maps (opcional)</label><input type="url" id="fMaps" placeholder="https://maps.app.goo.gl/…" value="' + esc(f.maps) + '"></div>');
-  if (comLocal){
-    h += '<div><label class="f">Visibilidade</label><div class="chips"><button class="chip ' + (f.privado ? "on" : "") + '" data-act="fPrivado">🔒 Lugar privado (só quem usa no grupo vê)</button></div>' +
-      '<div class="faint" style="margin-top:6px">Use para casas, locais pessoais ou o que não deve aparecer no catálogo de todos.</div></div>';
-  }
-  return h + '</div></details>';
-}
 function renderEnderecoExtras(){
   var el = $("endExtras"), f = S.form; if (!el) return;
   var h = "";
@@ -721,29 +768,21 @@ function renderEnderecoExtras(){
 function renderForm(){
   var f = S.form;
   if (S.map){ S.map.remove(); S.map = null; S.pin = null; }
-  var comLocal = f.modo === "novo" || f.modo === "admin" || (f.modo === "editar" && f.editavelLocal);
-  var h = '<div class="top"><button class="iconbtn" data-act="' + (f.modo === "existente" || f.modo === "novo" ? "voltaBusca" : "voltar") + '">‹</button><h1>' +
-    (f.modo === "admin" ? "Editar no catálogo" : f.modo === "editar" ? "Editar lugar" : "Novo lugar") + '</h1></div><div class="stack">';
+  var comLocal = f.modo !== "busca";
+  var h = '<div class="top"><button class="iconbtn" data-act="' + (f.modo === "novo" ? "voltaBusca" : "voltar") + '">‹</button><h1>' +
+    (f.modo === "editar" ? "Editar lugar" : "Novo lugar") + '</h1></div><div class="stack">';
   if (f.modo === "busca"){
-    h += '<p class="muted" style="margin:0">Escreva o nome. Se já estiver no catálogo, escolha o lugar para não duplicar.</p>' +
+    h += '<p class="muted" style="margin:0">Escreva o nome. Se o lugar já estiver no seu catálogo, ele aparece aqui para não duplicar.</p>' +
       '<input type="text" id="fNome" maxlength="120" autocomplete="off" placeholder="Nome do lugar" value="' + esc(f.nome) + '">' +
       '<div class="row"><span class="faint grow" id="locStatus"></span><button class="btn sec small" data-act="usarLoc">📍 Minha localização</button></div>' +
       '<div id="sugs"></div>' +
       '<button class="btn sec" data-act="novoLocal">Não achei, cadastrar novo lugar</button>';
   } else {
-    if (comLocal) h += htmlCamposLocal(f);
-    else h += '<div class="card"><div class="title">' + esc(f.modo === "existente" ? f.local.nome : f.nome) + '</div><div class="muted">' + resumoLocal(f.modo === "existente" ? f.local : f) + '</div>' +
-      (fmtEnd(f.modo === "existente" ? f.local : f) ? '<div class="faint">' + esc(fmtEnd(f.modo === "existente" ? f.local : f)) + '</div>' : '') +
-      (f.modo === "editar" ? '<div class="faint" style="margin-top:6px">Nome e endereço só podem ser mudados por quem cadastrou o lugar, e só enquanto nenhum outro grupo o usa.</div>' : '') + '</div>';
-    h += (f.modo === "admin" ? "" : htmlCamposGrupo(f)) + htmlMaisOpcoes(f, comLocal, f.modo === "admin") + '<div class="err" id="fErr"></div><button class="btn" id="fOk" data-act="salvarLugar">Salvar</button>';
-  }
-  if (f.modo === "editar"){
-    h += '<hr><div class="faint">Este lugar está duplicado no catálogo?</div><button class="btn sec" data-act="mesclar">Mesclar com outro lugar</button>';
-    h += '<button class="btn danger" data-act="apagarLugar">Remover do grupo</button>';
-  }
-  if (f.modo === "admin"){
-    h += '<hr><div class="faint">Duplicado no catálogo?</div><button class="btn sec" data-act="mesclar">Mesclar com outro lugar</button>';
-    h += '<button class="btn danger" data-act="excluirLocal">Excluir do catálogo</button>';
+    h += htmlCamposLocal(f) + htmlCamposGrupo(f) + '<div class="err" id="fErr"></div><button class="btn" id="fOk" data-act="salvarLugar">Salvar</button>';
+    if (f.modo === "editar"){
+      h += '<hr><div class="faint">Este lugar está duplicado no seu catálogo?</div><button class="btn sec" data-act="mesclar">Mesclar com outro lugar</button>';
+      h += '<button class="btn danger" data-act="apagarLugar">Remover do catálogo</button>';
+    }
   }
   h += '</div>';
   app.innerHTML = h;
@@ -766,43 +805,42 @@ function renderForm(){
   }
 }
 
-/* busca no catálogo: perto de mim + nome parecido */
+/* busca no catálogo do próprio grupo: nome parecido ou perto de mim */
 function buscarLocais(){
   var f = S.form; if (!f || f.modo !== "busca" || !$("fNome")) return;
-  var q = $("fNome").value.trim(), seq = ++buscaSeq;
-  f.nome = q;
-  if (!q && GEO.lat == null){ f.sugs = []; return renderSugs(); }
-  sb.rpc("buscar_locais", { p_nome: q, p_lat: GEO.lat, p_lng: GEO.lng }).then(function(r){
-    if (seq !== buscaSeq || !S.form || S.form.modo !== "busca") return;
-    f.sugs = r.error ? [] : (r.data || []);
-    f.sugsErro = r.error ? traduzErro(r.error) : "";
-    renderSugs();
+  var texto = $("fNome").value.trim(), q = norm(texto);
+  f.nome = texto;
+  var achados = S.lugares.map(function(l){
+    var n = norm(l.nome);
+    return { l: l, d: (GEO.lat != null && l.lat != null) ? distM(GEO.lat, GEO.lng, l.lat, l.lng) : null,
+      nome: q.length >= 2 && (n.indexOf(q) >= 0 || q.indexOf(n) >= 0) };
+  }).filter(function(x){ return x.nome || (x.d != null && x.d <= 150); });
+  achados.sort(function(a, b){
+    if (a.nome !== b.nome) return a.nome ? -1 : 1;
+    return (a.d == null ? 1e9 : a.d) - (b.d == null ? 1e9 : b.d);
   });
+  f.sugs = achados.slice(0, 6).map(function(x){
+    return { id: x.l.id, nome: x.l.nome, categoria: x.l.categoria, bairro: x.l.bairro, cidade: x.l.cidade,
+      endereco: x.l.endereco, numero: x.l.numero, distancia_m: x.d == null ? null : Math.round(x.d) };
+  });
+  renderSugs();
 }
 function renderSugs(){
   var el = $("sugs"), f = S.form; if (!el) return;
-  if (f.sugsErro){ el.innerHTML = '<div class="err">' + esc(f.sugsErro) + '</div>'; return; }
   if (!f.sugs.length){ el.innerHTML = ""; return; }
   var q = $("fNome") ? $("fNome").value.trim() : "";
-  var h = '<div class="faint" style="margin-bottom:8px">' + (q ? "Já existe no catálogo? Escolha para não duplicar:" : "Lugares perto de você:") + '</div>';
+  var h = '<div class="faint" style="margin-bottom:8px">' + (q ? "Já está no seu catálogo?" : "Do seu catálogo, perto de você:") + '</div>';
   f.sugs.forEach(function(x){
-    var noGrupo = S.lugares.some(function(l){ return l.local_id === x.id; });
-    var meta = [x.distancia_m != null ? (x.distancia_m < 1000 ? x.distancia_m + " m" : (x.distancia_m / 1000).toFixed(1).replace(".", ",") + " km") : null,
-      x.n_grupos ? x.n_grupos + (x.n_grupos === 1 ? " grupo usa" : " grupos usam") : null].filter(Boolean).join(" · ");
+    var dist = x.distancia_m != null ? (x.distancia_m < 1000 ? x.distancia_m + " m" : (x.distancia_m / 1000).toFixed(1).replace(".", ",") + " km") : "";
     h += '<div class="card click" data-act="pickLocal" data-id="' + esc(x.id) + '"><div class="row"><div class="grow">' +
       '<div class="title">' + esc(x.nome) + '</div><div class="muted">' + resumoLocal(x) + '</div>' +
       (fmtEnd(x) ? '<div class="faint">' + esc(fmtEnd(x)) + '</div>' : '') +
-      (meta ? '<div class="faint">' + esc(meta) + '</div>' : '') + '</div>' +
-      (noGrupo ? '<span class="tag plain">No seu grupo</span>' : '<span class="tag">É este</span>') + '</div></div>';
+      (dist ? '<div class="faint">' + esc(dist) + '</div>' : '') + '</div>' +
+      '<span class="tag">Abrir</span></div></div>';
   });
   el.innerHTML = h;
 }
-function pickLocal(id){
-  var f = S.form, x = f.sugs.filter(function(s){ return s.id === id; })[0]; if (!x) return;
-  var jaTem = S.lugares.filter(function(l){ return l.local_id === id; })[0];
-  if (jaTem) return go("#/g/" + S.grupo.id + "/lugar/" + jaTem.id);
-  f.modo = "existente"; f.local = x; renderForm();
-}
+function pickLocal(id){ go("#/g/" + S.grupo.id + "/lugar/" + id); }
 function novoLocal(){
   var f = S.form, nome = $("fNome").value.trim();
   if (nome.length < 2){ toast("Digite o nome do lugar primeiro."); return; }
@@ -859,171 +897,78 @@ function usarLocalizacao(){
 
 function salvarLugar(){
   var f = S.form, err = $("fErr"); err.textContent = "";
-  var maps = $("fMaps") ? $("fMaps").value.trim() : "";
-  if (maps && !/^https?:\/\//i.test(maps)){ err.textContent = "O link precisa começar com http:// ou https://"; return; }
-  var grupoPay = { estado: f.estado, atributos: f.atributos, maps_url: maps || null };
-  var editaLocal = f.modo === "novo" || f.modo === "admin" || (f.modo === "editar" && f.editavelLocal);
-  var nome = "", endereco = "", numero = "", cidade = "";
-  if (editaLocal){
-    nome = $("fNome").value.trim();
-    if (!nome){ err.textContent = "O nome é obrigatório."; return; }
-    endereco = $("fEndereco").value.trim();
-    numero = $("fNumero").value.trim();
-    f.endereco = endereco; f.numero = numero;
-    cidade = ($("fCidade") ? $("fCidade").value : f.cidade).trim();
-    if (cidade) lsSet("role_cidade", cidade);
-  }
+  var nome = $("fNome").value.trim();
+  if (!nome){ err.textContent = "O nome é obrigatório."; return; }
+  var endereco = $("fEndereco").value.trim(), numero = $("fNumero").value.trim();
+  f.endereco = endereco; f.numero = numero;
+  var cidade = ($("fCidade") ? $("fCidade").value : f.cidade).trim();
+  if (cidade) lsSet("role_cidade", cidade);
+  var grupoPay = { estado: f.estado, atributos: f.atributos };
   var btn = $("fOk"); btn.disabled = true; btn.textContent = "Salvando…";
-  var novo = f.modo !== "editar", compartilhado = false;
+  var novo = f.modo !== "editar";
 
   // o endereço digitado refina a posição quando o GPS não bate (ex.: cadastrou de casa) ou não existe
-  var refinar = editaLocal ? geocodificarForm() : Promise.resolve();
-  refinar.then(function(){
-    var local = editaLocal ? { nome: nome, categoria: f.categoria, bairro: f.bairro || null, cidade: cidade || null, endereco: endereco || null, numero: numero || null,
-      lat: f.lat, lng: f.lng, precisao: f.lat == null ? "desconhecida" : f.precisao, privado: !!f.privado } : null;
-    if (f.modo === "novo"){
+  geocodificarForm().then(function(){
+    var local = { nome: nome, categoria: f.categoria, bairro: f.bairro || null, cidade: cidade || null, endereco: endereco || null, numero: numero || null,
+      lat: f.lat, lng: f.lng, precisao: f.lat == null ? "desconhecida" : f.precisao };
+    if (novo){
       return sb.from("locais").insert(local).select().single().then(function(r){
         if (r.error) throw r.error;
         return sb.from("lugares").insert(Object.assign({ grupo_id: S.grupo.id, local_id: r.data.id }, grupoPay)).select().single();
       });
     }
-    if (f.modo === "admin"){
-      return sb.from("locais").update(local).eq("id", f.localId).select().then(function(r){
-        if (r.error) throw r.error;
-        if (!r.data || !r.data.length) throw new Error("Sem permissão para editar este lugar.");
-        return { admin: true };
-      });
-    }
-    if (f.modo === "existente"){
-      return sb.from("lugares").insert(Object.assign({ grupo_id: S.grupo.id, local_id: f.local.id }, grupoPay)).select().single();
-    }
-    return (editaLocal ? sb.from("locais").update(local).eq("id", f.localId).select() : Promise.resolve({ data: [1] })).then(function(r){
+    return sb.from("locais").update(local).eq("id", f.localId).select().then(function(r){
       if (r.error) throw r.error;
-      if (!r.data || !r.data.length) compartilhado = true;
+      if (!r.data || !r.data.length) throw new Error("Não foi possível salvar as mudanças deste lugar.");
       return sb.from("lugares").update(grupoPay).eq("id", f.id).select().single();
     });
   }).then(function(r){
     if (r.error) throw r.error;
-    if (r.admin){ toast("Salvo no catálogo."); return go("#/admin"); }
     var destino = r.data.id;
     return carregarGrupo(S.grupo.id).then(function(){
-      if (compartilhado) toast("Nome e endereço não mudaram: outro grupo usa este lugar.");
       if (novo && grupoPay.estado === "ja_fomos") go("#/g/" + S.grupo.id + "/visita/" + destino);
       else go("#/g/" + S.grupo.id + "/lugar/" + destino);
     });
   }).catch(function(e){
     btn.disabled = false; btn.textContent = "Salvar";
-    err.textContent = (e && e.code === "23505") ? "Esse lugar já está no seu grupo." : traduzErro(e);
+    err.textContent = traduzErro(e);
   });
 }
 function apagarLugar(){
   var l = lugarPorId(S.form.id);
-  if (!confirm("Remover \"" + l.nome + "\" do grupo? As visitas e avaliações dele neste grupo serão apagadas. O lugar continua no catálogo.")) return;
+  if (!confirm("Remover \"" + l.nome + "\" do catálogo? As visitas e avaliações deste lugar serão apagadas. Isso não dá para desfazer.")) return;
   sb.from("lugares").delete().eq("id", l.id).then(function(r){
     if (r.error){ toast(traduzErro(r.error)); return; }
     carregarGrupo(S.grupo.id).then(function(){ go("#/g/" + S.grupo.id); });
   });
 }
 
-/* ---------- catálogo (somente admin) ---------- */
-var admTimer = null, admSeq = 0;
-function viewAdmin(){
-  if (!S.admin) return go("#/grupos");
-  limparMapaGrupo();
-  var fl = [["", "Todos"], ["sem_end", "Sem endereço"], ["sem_loc", "Sem localização"]];
-  app.innerHTML = '<div class="top"><button class="iconbtn" data-act="irGrupos">‹</button><h1>Catálogo</h1><span class="tag">Admin</span></div>' +
-    '<input type="text" id="admBusca" placeholder="Buscar no catálogo…" autocomplete="off" value="' + esc(S.admBusca) + '">' +
-    '<div class="chips" style="margin:10px 0">' + fl.map(function(x){
-      return '<button class="chip ' + (S.admFiltro === x[0] ? "on" : "") + '" data-act="admFiltro" data-v="' + x[0] + '">' + x[1] + '</button>';
-    }).join("") + '</div><div id="admLista"><p class="empty">Carregando…</p></div>';
-  $("admBusca").addEventListener("input", function(e){
-    S.admBusca = e.target.value; clearTimeout(admTimer); admTimer = setTimeout(carregarAdmin, 300);
-  });
-  carregarAdmin();
-}
-function carregarAdmin(){
-  var el = $("admLista"); if (!el) return;
-  var q = (S.admBusca || "").trim().replace(/[%_,()*]/g, ""), seq = ++admSeq;
-  var qb = sb.from("locais").select("id,nome,categoria,bairro,cidade,endereco,numero,lat,lng,privado")
-    .eq("status", "ativo").order("created_at", { ascending: false }).limit(60);
-  if (q) qb = qb.ilike("nome", "%" + q + "%");
-  if (S.admFiltro === "sem_end") qb = qb.is("endereco", null);
-  if (S.admFiltro === "sem_loc") qb = qb.is("lat", null);
-  qb.then(function(r){
-    if (seq !== admSeq || !$("admLista")) return;
-    if (r.error){ el.innerHTML = '<div class="err">' + esc(traduzErro(r.error)) + '</div>'; return; }
-    var lista = r.data || [];
-    if (!lista.length){ el.innerHTML = '<div class="empty">Nenhum lugar encontrado.</div>'; return; }
-    el.innerHTML = lista.map(function(x){
-      var faltas = [];
-      if (!x.endereco) faltas.push("sem endereço");
-      if (x.lat == null) faltas.push("sem localização");
-      if (x.privado) faltas.push("privado");
-      return '<div class="card click" data-act="abrirAdminLocal" data-id="' + esc(x.id) + '"><div class="title">' + esc(x.nome) + '</div>' +
-        '<div class="muted">' + resumoLocal(x) + '</div>' +
-        (fmtEnd(x) ? '<div class="faint">' + esc(fmtEnd(x)) + '</div>' : '') +
-        (faltas.length ? '<div class="faint" style="color:var(--mid)">' + esc(faltas.join(" · ")) + '</div>' : '') + '</div>';
-    }).join("") + (lista.length === 60 ? '<div class="faint center">Mostrando os 60 mais recentes. Use a busca para filtrar.</div>' : "");
-  });
-}
-function viewAdminLocal(id){
-  if (!S.admin) return go("#/grupos");
-  app.innerHTML = '<p class="empty">Carregando…</p>';
-  sb.from("locais").select("*").eq("id", id).single().then(function(r){
-    if (r.error || !r.data){ toast("Lugar não encontrado."); return go("#/admin"); }
-    var l = r.data;
-    S.form = { modo: "admin", localId: id, nome: l.nome, categoria: l.categoria, bairro: l.bairro || "", cidade: l.cidade || "",
-      endereco: l.endereco || "", numero: l.numero || "", geoQuery: queryEnd(l.endereco, l.numero), lat: l.lat, lng: l.lng, precisao: l.precisao,
-      estado: "ja_fomos", atributos: [], maps: "", privado: !!l.privado, editavelLocal: true };
-    renderForm();
-  });
-}
-function excluirLocalAdmin(){
-  var f = S.form;
-  if (!confirm("Excluir \"" + f.nome + "\" do catálogo? Só é possível se nenhum grupo usa este lugar.")) return;
-  sb.from("locais").delete().eq("id", f.localId).select().then(function(r){
-    if (r.error){
-      toast(r.error.code === "23503" ? "Algum grupo usa este lugar. Mescle com outro em vez de excluir." : traduzErro(r.error));
-      return;
-    }
-    toast("Excluído do catálogo."); go("#/admin");
-  });
-}
-
-/* ---------- mesclar duplicados ---------- */
-var mesclaTimer = null, mesclaSeq = 0;
+/* ---------- mesclar duplicados (dentro do próprio catálogo) ---------- */
 function abrirMesclar(){
-  var f = S.form; S.mesclaSugs = [];
+  var f = S.form;
   abrirSheet('<h2 style="margin-bottom:6px">Mesclar duplicado</h2>' +
-    '<p class="muted" style="margin-top:0">Procure o lugar correto. As visitas e avaliações de "' + esc(f.nome) + '" serão movidas para ele e este deixa de aparecer.</p>' +
-    '<input type="text" id="mBusca" placeholder="Nome do lugar correto" autocomplete="off"><div id="mRes" style="margin-top:10px"></div>');
-  $("mBusca").focus();
-  $("mBusca").addEventListener("input", function(){
-    clearTimeout(mesclaTimer);
-    mesclaTimer = setTimeout(function(){
-      var q = $("mBusca") ? $("mBusca").value.trim() : "", seq = ++mesclaSeq;
-      if (q.length < 2){ $("mRes").innerHTML = ""; return; }
-      sb.rpc("buscar_locais", { p_nome: q, p_lat: null, p_lng: null, p_raio: 100000 }).then(function(r){
-        if (seq !== mesclaSeq || !$("mRes")) return;
-        S.mesclaSugs = (r.data || []).filter(function(x){ return x.id !== f.localId; });
-        $("mRes").innerHTML = S.mesclaSugs.length ? S.mesclaSugs.map(function(x){
-          return '<div class="card click" data-act="mesclarPara" data-id="' + esc(x.id) + '"><div class="title">' + esc(x.nome) + '</div><div class="muted">' + resumoLocal(x) + '</div></div>';
-        }).join("") : '<div class="faint">Nada encontrado.</div>';
-      });
-    }, 300);
-  });
+    '<p class="muted" style="margin-top:0">Escolha o lugar correto. As visitas e avaliações de "' + esc(f.nome) + '" serão movidas para ele e este deixa de aparecer.</p>' +
+    '<input type="text" id="mBusca" placeholder="Buscar no seu catálogo" autocomplete="off"><div id="mRes" style="margin-top:10px"></div>');
+  var desenhar = function(){
+    var q = norm($("mBusca").value);
+    S.mesclaSugs = S.lugares.filter(function(l){ return l.local_id !== f.localId && (!q || norm(l.nome).indexOf(q) >= 0); }).slice(0, 8);
+    $("mRes").innerHTML = S.mesclaSugs.length ? S.mesclaSugs.map(function(x){
+      return '<div class="card click" data-act="mesclarPara" data-id="' + esc(x.local_id) + '"><div class="title">' + esc(x.nome) + '</div><div class="muted">' + resumoLocal(x) + '</div>' +
+        (fmtEnd(x) ? '<div class="faint">' + esc(fmtEnd(x)) + '</div>' : '') + '</div>';
+    }).join("") : '<div class="faint">Nada encontrado.</div>';
+  };
+  $("mBusca").addEventListener("input", desenhar);
+  desenhar(); $("mBusca").focus();
 }
-function mesclarPara(destinoId){
-  var f = S.form, x = (S.mesclaSugs || []).filter(function(s){ return s.id === destinoId; })[0]; if (!x) return;
+function mesclarPara(destinoLocalId){
+  var f = S.form, x = (S.mesclaSugs || []).filter(function(l){ return l.local_id === destinoLocalId; })[0]; if (!x) return;
   if (!confirm("Mover tudo de \"" + f.nome + "\" para \"" + x.nome + "\"? Isso não dá para desfazer.")) return;
-  sb.rpc("mesclar_locais", { p_origem: f.localId, p_destino: destinoId }).then(function(r){
+  sb.rpc("mesclar_locais", { p_origem: f.localId, p_destino: destinoLocalId }).then(function(r){
     if (r.error){ toast(traduzErro(r.error)); return; }
     fecharSheet();
-    if (f.modo === "admin"){ toast("Lugares mesclados."); return go("#/admin"); }
     carregarGrupo(S.grupo.id).then(function(){
-      var l = S.lugares.filter(function(z){ return z.local_id === destinoId; })[0];
       toast("Lugares mesclados.");
-      go(l ? "#/g/" + S.grupo.id + "/lugar/" + l.id : "#/g/" + S.grupo.id);
+      go("#/g/" + S.grupo.id + "/lugar/" + x.id);
     });
   });
 }
@@ -1121,7 +1066,7 @@ document.addEventListener("click", function(e){
     case "authModo": S.authModo = S.authModo === "login" ? "cadastro" : "login"; return viewAuth();
     case "sair": return sb.auth.signOut();
     case "abrirGrupo": return go("#/g/" + d.id);
-    case "irGrupos": S._grupoAuto = true; S.grupo = null; return go("#/grupos");
+    case "irGrupos": S._grupoAuto = true; S.grupo = null; S.somenteLeitura = false; return go("#/grupos");
     case "sheetCriar": return sheetCriar();
     case "sheetEntrar": return sheetEntrar();
     case "gTipo": S.sheetTipo = d.v; return marcar($("gTipo"), el, false);
@@ -1139,7 +1084,7 @@ document.addEventListener("click", function(e){
     case "vista": S.vista = S.vista === "mapa" ? "lista" : "mapa"; lsSet("role_vista", S.vista); return viewLista();
     case "mapaEu": return mapaOndeEstou();
     case "novoLugar": return go("#/g/" + g + "/novo");
-    case "abrirLugar": return go("#/g/" + g + "/lugar/" + d.id);
+    case "abrirLugar": if (S.somenteLeitura) return sheetLugarPublico(d.id); return go("#/g/" + g + "/lugar/" + d.id);
     case "editarLugar": return go("#/g/" + g + "/editar/" + d.id);
     case "voltarLista": return go("#/g/" + g);
     case "voltar": return history.back();
@@ -1153,15 +1098,14 @@ document.addEventListener("click", function(e){
       if (i >= 0) S.form.atributos.splice(i, 1); else S.form.atributos.push(d.v);
       return marcar(el.parentNode, el, true);
     case "usarLoc": return usarLocalizacao();
-    case "admin": return go("#/admin");
-    case "admFiltro": S.admFiltro = d.v; return viewAdmin();
-    case "abrirAdminLocal": return go("#/admin/local/" + d.id);
-    case "excluirLocal": return excluirLocalAdmin();
+    case "catalogoVis": return mudarVisibilidade(d.v);
+    case "copiarPublico":
+      if (navigator.clipboard) navigator.clipboard.writeText(S.linkPublico).then(function(){ toast("Link copiado"); });
+      return;
     case "trocarCidade": S.form.editCidade = true; renderEnderecoExtras(); return $("fCidade") && $("fCidade").focus();
     case "usarEndereco": $("fEndereco").value = S.form.endAtual; S.form.endereco = S.form.endAtual;
       $("fNumero").value = S.form.numAtual || ""; S.form.numero = S.form.numAtual || "";
       renderEnderecoExtras(); return agendarGeocode();
-    case "fPrivado": S.form.privado = !S.form.privado; return el.classList.toggle("on", S.form.privado);
     case "mesclar": return abrirMesclar();
     case "mesclarPara": return mesclarPara(d.id);
     case "pickLocal": return pickLocal(d.id);
@@ -1182,6 +1126,11 @@ document.addEventListener("click", function(e){
       lsSet("role_convite", c.toUpperCase());
       history.replaceState(null, "", location.pathname + location.hash);
     }
+    var pb = new URLSearchParams(location.search).get("publico");
+    if (pb && /^[0-9a-f-]{36}$/i.test(pb)){
+      lsSet("role_publico", pb.toLowerCase());
+      history.replaceState(null, "", location.pathname + location.hash);
+    }
   } catch(e){}
 })();
 
@@ -1199,8 +1148,8 @@ function iniciar(user){
       if (r.data) r.data.forEach(function(x){ S.perfis[x.id] = x; });
     });
   }).then(function(){
-    return sb.from("admins").select("user_id").eq("user_id", user.id).then(function(r){ S.admin = !!(r.data && r.data.length); });
-  }).then(function(){
+    var pub = lsGet("role_publico");
+    if (pub){ lsSet("role_publico", null); location.hash = "#/publico/" + pub; return; }
     if (!location.hash || location.hash === "#/" || location.hash === "#"){
       var ultimo = lsGet("role_grupo");
       if (ultimo && S.grupos.some(function(g){ return g.id === ultimo; })) location.hash = "#/g/" + ultimo;
@@ -1214,7 +1163,7 @@ sb.auth.onAuthStateChange(function(evento, session){
     if (session && session.user){
       if (!S.user || S.user.id !== session.user.id) iniciar(session.user);
     } else {
-      S.user = null; S.admin = false; S.grupo = null; S.grupos = []; S.lugares = [];
+      S.user = null; S.grupo = null; S.somenteLeitura = false; S.grupos = []; S.lugares = [];
       location.hash = ""; viewAuth();
     }
   }, 0);
