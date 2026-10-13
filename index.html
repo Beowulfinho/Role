@@ -244,6 +244,7 @@ function carregarGrupos(){
       S.grupos = (r.data||[]).filter(function(x){ return x.grupos; }).map(function(x){
         return { id:x.grupos.id, nome:x.grupos.nome, tipo:x.grupos.tipo, codigo:x.grupos.codigo_convite, papel:x.papel, publico: !!x.grupos.publico };
       });
+      S.grupos.sort(function(a, b){ return (b.tipo === "pessoal") - (a.tipo === "pessoal"); });
     });
 }
 function carregarGrupo(id){
@@ -337,13 +338,13 @@ function viewGrupos(){
   }
   S.grupos.forEach(function(g){
     h += '<div class="card click" data-act="abrirGrupo" data-id="' + esc(g.id) + '"><div class="row"><div class="grow">' +
-      '<div class="title">' + esc(g.nome) + '</div><div class="faint">' + (g.tipo === "casal" ? "Casal" : "Amigos") + '</div></div><span>›</span></div></div>';
+      '<div class="title">' + (g.tipo === "pessoal" ? "👤 " : "") + esc(g.nome) + '</div><div class="faint">' + (g.tipo === "pessoal" ? "Só meu" : g.tipo === "casal" ? "Casal" : "Amigos") + '</div></div><span>›</span></div></div>';
   });
   h += '<hr><div class="stack">' +
     '<button class="btn" data-act="sheetCriar">Criar grupo</button>' +
     '<button class="btn sec" data-act="sheetEntrar">Entrar com código</button></div>';
   app.innerHTML = h;
-  if (S.grupos.length === 1 && !S._grupoAuto){ S._grupoAuto = true; go("#/g/" + S.grupos[0].id); }
+  if (S.grupos.length === 1 && S.grupos[0].tipo !== "pessoal" && !S._grupoAuto){ S._grupoAuto = true; go("#/g/" + S.grupos[0].id); }
 }
 function abrirSheet(html){
   fecharSheet();
@@ -395,7 +396,7 @@ function viewLista(){
   var g = S.grupo;
   var h = '<div class="top"><button class="iconbtn" data-act="irGrupos" aria-label="Grupos">‹</button><h1>' + esc(g.nome) + '</h1>' +
     '<button class="iconbtn" data-act="vista">' + (S.vista === "mapa" ? "☰ Lista" : "🗺️ Mapa") + '</button>' +
-    (S.somenteLeitura ? '<span class="tag">Público</span>' : '<button class="iconbtn" data-act="convidar">Convidar</button>') + '</div>' +
+    (S.somenteLeitura ? '<span class="tag">Público</span>' : '<button class="iconbtn" data-act="convidar">' + (S.grupo.tipo === "pessoal" ? "Compartilhar" : "Convidar") + '</button>') + '</div>' +
     '<div class="tabs" style="margin-bottom:12px">' +
       '<button data-act="aba" data-v="ja_fomos" class="' + (S.aba === "ja_fomos" ? "on" : "") + '">Já fomos</button>' +
       '<button data-act="aba" data-v="quero_ir" class="' + (S.aba === "quero_ir" ? "on" : "") + '">Quero ir</button></div>' +
@@ -584,9 +585,11 @@ function mudarVisibilidade(v){
   });
 }
 
-function secaoCatalogo(g){
-  var h = '<hr style="margin:18px 0 14px"><h3 style="margin-bottom:6px">Catálogo do grupo</h3>' +
-    '<p class="muted" style="margin-top:0">Privado: só quem está no grupo vê. Público: qualquer pessoa com conta e o link vê a lista, o mapa e a nota média (sem comentários nem gastos).</p>';
+function secaoCatalogo(g, semTitulo){
+  var pessoal = g.tipo === "pessoal";
+  var h = (semTitulo ? "" : '<hr style="margin:18px 0 14px"><h3 style="margin-bottom:6px">Catálogo do grupo</h3>') +
+    '<p class="muted" style="margin-top:0">' + (pessoal ? "Privado: só você vê." : "Privado: só quem está no grupo vê.") +
+    ' Público: qualquer pessoa com conta e o link vê a lista, o mapa e a nota média (sem comentários nem gastos).</p>';
   if (g.papel === "admin"){
     h += '<div class="chips"><button class="chip ' + (!g.publico ? "on" : "") + '" data-act="catalogoVis" data-v="privado">🔒 Privado</button>' +
       '<button class="chip ' + (g.publico ? "on" : "") + '" data-act="catalogoVis" data-v="publico">🌐 Público</button></div>';
@@ -598,12 +601,16 @@ function secaoCatalogo(g){
     S.linkPublico = link;
     h += '<div class="stack" style="margin-top:12px"><button class="btn sec" data-act="copiarPublico">Copiar link público</button>' +
       '<a class="btn sec" style="text-decoration:none;text-align:center" target="_blank" rel="noopener" href="https://wa.me/?text=' +
-      encodeURIComponent("Veja o nosso catálogo de lugares no Rolê: " + link) + '">Enviar link pelo WhatsApp</a></div>';
+      encodeURIComponent((pessoal ? "Veja o meu catálogo de lugares no Rolê: " : "Veja o nosso catálogo de lugares no Rolê: ") + link) + '">Enviar link pelo WhatsApp</a></div>';
   }
   return h;
 }
 function convidar(){
   var g = S.grupo;
+  if (g.tipo === "pessoal"){
+    abrirSheet('<h2 style="margin-bottom:8px">Compartilhar meu catálogo</h2>' + secaoCatalogo(g, true));
+    return;
+  }
   var link = location.origin + location.pathname + "?codigo=" + encodeURIComponent(g.codigo);
   S.convite = { link: link, texto: "Entra no nosso grupo \"" + g.nome + "\" no Rolê! Código: " + g.codigo + "\n" + link };
   abrirSheet('<h2>Convidar para ' + esc(g.nome) + '</h2><div class="code">' + esc(g.codigo) + '</div>' +
@@ -1352,7 +1359,7 @@ document.addEventListener("click", function(e){
 function iniciar(user){
   S.user = user; S.grupo = null; S._grupoAuto = false;
   var conv = lsGet("role_convite");
-  var p = carregarGrupos();
+  var p = sb.rpc("garantir_catalogo_pessoal").then(function(){}, function(){}).then(function(){ return carregarGrupos(); });
   if (conv){
     lsSet("role_convite", null);
     p = p.then(function(){ return entrarGrupo(conv, true); }).then(function(){ return carregarGrupos(); });
